@@ -86,6 +86,8 @@ input:
       .*_wrist_roll_joint: 0.44
       .*_wrist_pitch_joint: 0.07
       .*_wrist_yaw_joint: 0.07
+      # .*_wrist_pitch_joint: 0.44
+      # .*_wrist_yaw_joint: 0.44
     min_delay: 1
     max_delay: 3
     alpha_range: [0.8, 1.0]
@@ -124,6 +126,19 @@ command:
 
 observation:
   policy:
+
+  # command:
+    ref_root_pos_future_local:
+      _target_: hdmi.ref_body_pos_future_local
+      body_names: "pelvis"
+      noise_std: 0.005
+    ref_root_ori_future_b:
+      _target_: hdmi.ref_root_ori_future_b
+      noise_std: 0.05
+
+    ref_joint_pos_future:
+      _target_: hdmi.ref_joint_pos_future
+
     root_ang_vel_history:
       _target_: hdmi.root_ang_vel_history
       history_steps: [0, 1, 2, 3, 4, 8, 16]
