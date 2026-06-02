@@ -25,7 +25,7 @@ export_policy: false
 
 camera_follow: true
 nproc_per_node: 8
-script: projects/hdmi/scripts/train.py
+script: projects/mimic-lite/scripts/train.py
 random_suffix_length: 8
 tag: ${task.name}
 

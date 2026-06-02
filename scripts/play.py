@@ -143,8 +143,8 @@ def export_policy(cfg: DictConfig, env: "_EnvBase", policy) -> None:
     policy_config["default_joint_pos"] = asset_meta["default_joint_pos"]
 
     # Make joint observation order explicit for sim2real consumers.
-    from hdmi.tasks.command import RobotTracking
-    from hdmi.tasks.actions import JointPosition
+    from mimic_lite.tasks.command import RobotTracking
+    from mimic_lite.tasks.actions import JointPosition
     action_manager = cast(JointPosition, env.action_manager)
     policy_config["policy_joint_names"] = action_manager.joint_names
     policy_config["action_scale"] = action_manager.action_scaling.detach().cpu().tolist()
@@ -152,7 +152,7 @@ def export_policy(cfg: DictConfig, env: "_EnvBase", policy) -> None:
     command = cast(RobotTracking, env.command_manager)
 
     motion_cfg = policy_config.setdefault("motion", {})
-    from hdmi.tasks.multi_dataset import motion_cfgs_to_dict
+    from mimic_lite.tasks.multi_dataset import motion_cfgs_to_dict
 
     motion_cfg["motion_cfgs"] = motion_cfgs_to_dict(command.motion_cfgs)
     if len(command.motion_cfgs) == 1 and isinstance(command.motion_cfgs[0].path, str):

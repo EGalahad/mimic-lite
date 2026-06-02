@@ -1,4 +1,4 @@
-from hdmi.tasks.command import RobotTracking
+from mimic_lite.tasks.command import RobotTracking
 
 from active_adaptation.envs.mdp.rewards.base import Reward as BaseReward
 from active_adaptation.envs.utils import find_bodies, find_joints, find_sensor_bodies

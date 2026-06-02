@@ -8,7 +8,7 @@ except ModuleNotFoundError:
     from mjlab.utils.lab_api import string as string_utils
 
 if TYPE_CHECKING:
-    from hdmi.tasks.actions import JointPosition
+    from mimic_lite.tasks.actions import JointPosition
 
 def uniform(low: torch.Tensor, high: torch.Tensor):
     r = torch.rand_like(low)

@@ -1,7 +1,7 @@
 from active_adaptation.envs.mdp.commands.base import Command
 from active_adaptation.envs.utils import find_bodies, find_joints
-from hdmi.tasks.motion import MotionData, create_dataset_from_path
-from hdmi.tasks.multi_dataset import (
+from mimic_lite.tasks.motion import MotionData, create_dataset_from_path
+from mimic_lite.tasks.multi_dataset import (
     MotionDatasetConfig,
     load_motion_dataset_collection,
     normalize_motion_cfgs,

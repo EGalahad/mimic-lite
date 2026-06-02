@@ -83,7 +83,7 @@ def _init_sac_linear(m: nn.Module, gain: float = 1.0):
 
 @dataclass
 class SACConfig:
-    _target_: str = "hdmi_learning.sac.SAC"
+    _target_: str = "mimic_lite_learning.sac.SAC"
     name: str = "sac"
     train_every: int = 4
     buffer_size: int = 2000

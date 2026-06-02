@@ -6,7 +6,7 @@ import active_adaptation as aa
 from active_adaptation.envs.mdp.observations.base import Observation as BaseObservation
 from active_adaptation.envs.utils import find_bodies, find_joints
 from active_adaptation.utils.math import quat_rotate_inverse
-from hdmi.tasks.actions import JointPosition
+from mimic_lite.tasks.actions import JointPosition
 
 if aa.get_backend() == "isaac":
     from isaaclab.assets import ArticulationData

@@ -1,7 +1,7 @@
 """Feet-related reward aliases for HDMI tasks."""
 
 import active_adaptation as aa
-from hdmi.tasks.command import RobotTracking
+from mimic_lite.tasks.command import RobotTracking
 from active_adaptation.envs.mdp.rewards.base import Reward as BaseReward
 from active_adaptation.envs.utils import find_bodies, find_sensor_bodies
 from typing import TYPE_CHECKING, cast

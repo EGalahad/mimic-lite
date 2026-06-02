@@ -1,4 +1,4 @@
-from hdmi.tasks.command import RobotTracking
+from mimic_lite.tasks.command import RobotTracking
 from active_adaptation.envs.mdp.terminations.base import Termination as BaseTermination
 
 import torch

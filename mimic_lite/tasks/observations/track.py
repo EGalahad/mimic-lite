@@ -1,5 +1,5 @@
-from hdmi.tasks.command import RobotTracking
-from hdmi.tasks.actions import JointPosition
+from mimic_lite.tasks.command import RobotTracking
+from mimic_lite.tasks.actions import JointPosition
 
 from active_adaptation.envs.mdp.observations.base import Observation as BaseObservation
 from active_adaptation.envs.utils import find_bodies

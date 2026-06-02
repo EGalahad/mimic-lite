@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hdmi"
+name = "mimic-lite"
 version = "0.1.0"
 requires-python = ">=3.11,<3.13"
 dependencies = [
@@ -17,13 +17,15 @@ dependencies = [
 any4hdmi = { path = "../../../any4hdmi", editable = true }
 
 [project.entry-points."active_adaptation.projects"]
+mimic_lite = "mimic_lite"
 hdmi = "hdmi"
 
 [project.entry-points."active_adaptation.learning"]
+mimic_lite = "mimic_lite_learning"
 hdmi = "hdmi_learning"
 
 [tool.setuptools.packages]
-find = { where = ["."], include = ["hdmi*"] }
+find = { where = ["."], include = ["mimic_lite*", "mimic_lite_learning*", "hdmi", "hdmi_learning"] }
 
 [tool.setuptools.package-data]
 "*" = ["**/*"]
