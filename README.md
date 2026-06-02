@@ -1,23 +1,23 @@
-# Simple-Tracking
+# MimicLite
 
 ## Setup
 
-Clone the `active-adaptation` repository and the HDMI project:
+Clone the `active-adaptation` repository and the MimicLite project:
 
 ```bash
 git clone -b dev/hdmi https://github.com/Agent-3154/active-adaptation.git
 cd active-adaptation
-git clone https://github.com/EGalahad/aa-hdmi projects/hdmi
+git clone https://github.com/EGalahad/mimic-lite projects/mimic-lite
 ```
 
 Setup uv venv directories and install dependencies:
 
 ```bash
 mkdir -p venv/mjlab
-cp projects/hdmi/pyproject-mjlab.toml venv/mjlab/pyproject.toml
+cp projects/mimic-lite/pyproject-mjlab.toml venv/mjlab/pyproject.toml
 
 mkdir -p venv/isaaclab
-cp projects/hdmi/pyproject-isaaclab.toml venv/isaaclab/pyproject.toml
+cp projects/mimic-lite/pyproject-isaaclab.toml venv/isaaclab/pyproject.toml
 ```
 
 The repository should now look like this:
@@ -31,7 +31,7 @@ active-adaptation/
 │       └── pyproject.toml
 ├── active_adaptation/
 ├── projects/
-│   └── hdmi/
+│   └── mimic-lite/
 └─ scripts/
 ```
 
@@ -41,7 +41,7 @@ Refresh project discovery:
 uv --project venv/mjlab run aa-discover-projects
 ```
 
-This command generates the project registry at `.cache/projects.json`. Open that file and make sure both HDMI entries are enabled:
+This command generates the project registry at `.cache/projects.json`. Open that file and make sure both MimicLite entries are enabled:
 
 Set up environment variables:
 
@@ -55,38 +55,38 @@ export HF_TOKEN=<your_huggingface_token>
 Run single-stage PPO:
 
 ```bash
-bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/hdmi/scripts/train.py venv/mjlab \
+bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
   task=lafan_100style_real +exp=ppo/train backend=mjlab
 ```
 
 Run SAC:
 
 ```bash
-bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/hdmi/scripts/train.py venv/mjlab \
+bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
   task=lafan_100style_real +exp=sac/train backend=mjlab
 ```
 
 Run sequential PPO:
 
 ```bash
-uv --project venv/mjlab run projects/hdmi/scripts/train_sequential.py \
+uv --project venv/mjlab run projects/mimic-lite/scripts/train_sequential.py \
   nproc_per_node=8 task=lafan_100style_real stages=normal backend=mjlab
 ```
 
 To play checkpoints:
 
 ```bash
-uv --project venv/mjlab run projects/hdmi/scripts/play.py \
+uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
   task=lafan +exp=ppo/train backend=mjlab \
   checkpoint_path=run:elijahgalahad/hdmi/runs/kr0vxm4n \
   task.num_envs=4 task.termination.root_pos_error.enabled=false
 
-uv --project venv/mjlab run projects/hdmi/scripts/play.py \
+uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
   task=lafan +exp=sac/train backend=mjlab \
   checkpoint_path=run:elijahgalahad/hdmi/runs/5jzn40za \
   task.num_envs=4 task.termination.root_pos_error.enabled=false
 
-uv --project venv/mjlab run projects/hdmi/scripts/play.py \
+uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
   task=lafan +exp=ppo_roa/finetune backend=mjlab \
   checkpoint_path=run:elijahgalahad/hdmi/runs/a03f770b_lafan_100style_finetune \
   task.num_envs=4 task.termination.root_pos_error.enabled=false
