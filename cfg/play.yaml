@@ -4,7 +4,7 @@ hydra:
 
 headless: false
 
-backend: isaac
+backend: mjlab
 device: cuda
 
 app:
@@ -14,6 +14,7 @@ app:
 seed: 42
 checkpoint_path: null
 export_policy: false
+export_only: false
 render_seconds: 0
 
 camera_follow: true
@@ -21,9 +22,11 @@ camera_follow: true
 
 defaults:
   - task: lafan_100style_real
-  - algo: hdmi_ppo
+  - algo: mimic_lite_ppo
   - override /task/command/future_steps: short
   - _self_
 
 task:
   num_envs: 4
+  command:
+    start_from_zero: true

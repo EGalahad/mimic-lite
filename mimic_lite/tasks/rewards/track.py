@@ -47,7 +47,7 @@ def _select_tracking_joint_names(
     return selected_joint_indices, selected_joint_names
 
 
-class _tracking_body(TrackReward, namespace="hdmi"):
+class _tracking_body(TrackReward, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -72,67 +72,67 @@ class _tracking_body(TrackReward, namespace="hdmi"):
         raise NotImplementedError
 
 
-class body_pos_exp(_tracking_body, namespace="hdmi"):
+class body_pos_exp(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_pos_error[:, self.body_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class body_pos_local_exp(_tracking_body, namespace="hdmi"):
+class body_pos_local_exp(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_pos_error_local[:, self.body_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class body_pos_error(_tracking_body, namespace="hdmi"):
+class body_pos_error(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_pos_error[:, self.body_indices_tracking]
         return error.mean(dim=1).unsqueeze(1)
 
 
-class body_pos_error_local(_tracking_body, namespace="hdmi"):
+class body_pos_error_local(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_pos_error_local[:, self.body_indices_tracking]
         return error.mean(dim=1).unsqueeze(1)
 
 
-class body_ori_exp(_tracking_body, namespace="hdmi"):
+class body_ori_exp(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_ori_error[:, self.body_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class body_ori_local_exp(_tracking_body, namespace="hdmi"):
+class body_ori_local_exp(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_ori_error_local[:, self.body_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class body_ori_error(_tracking_body, namespace="hdmi"):
+class body_ori_error(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_ori_error[:, self.body_indices_tracking]
         return error.mean(dim=1).unsqueeze(1)
 
 
-class body_ori_error_local(_tracking_body, namespace="hdmi"):
+class body_ori_error_local(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_ori_error_local[:, self.body_indices_tracking]
         return error.mean(dim=1).unsqueeze(1)
 
 
-class body_lin_vel_exp(_tracking_body, namespace="hdmi"):
+class body_lin_vel_exp(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_lin_vel_error[:, self.body_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class body_ang_vel_exp(_tracking_body, namespace="hdmi"):
+class body_ang_vel_exp(_tracking_body, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.body_ang_vel_error[:, self.body_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class _tracking_joint(TrackReward, namespace="hdmi"):
+class _tracking_joint(TrackReward, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -155,25 +155,25 @@ class _tracking_joint(TrackReward, namespace="hdmi"):
     def _compute(self):
         raise NotImplementedError
 
-class joint_pos_tracking_product(_tracking_joint, namespace="hdmi"):
+class joint_pos_tracking_product(_tracking_joint, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.joint_pos_error[:, self.joint_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class joint_pos_error(_tracking_joint, namespace="hdmi"):
+class joint_pos_error(_tracking_joint, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.joint_pos_error[:, self.joint_indices_tracking]
         return error.mean(dim=1).unsqueeze(1)
 
 
-class joint_vel_tracking_product(_tracking_joint, namespace="hdmi"):
+class joint_vel_tracking_product(_tracking_joint, namespace="mimic_lite"):
     def _compute(self):
         error = self.command_manager.joint_vel_error[:, self.joint_indices_tracking]
         return torch.exp(-error.mean(dim=1) / self.sigma).unsqueeze(1)
 
 
-class feet_air_time_ref(TrackReward, namespace="hdmi"):
+class feet_air_time_ref(TrackReward, namespace="mimic_lite"):
     def __init__(self, env, body_names: List[str] | str, thres: float, **kwargs):
         super().__init__(env, **kwargs)
         self.thres = thres

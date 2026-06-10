@@ -144,8 +144,8 @@ def main(cfg: DictConfig):
         default_run_name = (
             f"{cfg.exp_name}-{datetime.datetime.now().strftime('%Y-%m-%d-%H-%M')}"
         )
-        wandb_id = run.name.split("-")[-1]
-        run.name = f"{wandb_id}-{default_run_name}"
+        run_idx = run.id if run.name is None else run.name.split("-")[-1]
+        run.name = f"{run_idx}-{default_run_name}"
         setproctitle(run.name)
 
         run_dir = Path(run.dir)
@@ -203,17 +203,22 @@ def main(cfg: DictConfig):
                         data_buf[:, step] = td
 
                     if requires_rollout_value:
-                        policy.critic(data_buf)
-                        values = data_buf["state_value"]
-                        last_value = policy.compute_value(carry.copy())["state_value"]
-                        next_values = torch.cat(
-                            [values[:, 1:], last_value.unsqueeze(1)], dim=1
-                        )
-                        data_buf["next", "state_value"] = torch.where(
-                            data_buf["next", "done"],
-                            values,
-                            next_values,
-                        )
+                        if hasattr(policy, "compute_rollout_values"):
+                            policy.compute_rollout_values(data_buf, carry.copy())
+                        else:
+                            policy.critic(data_buf)
+                            values = data_buf["state_value"]
+                            last_value = policy.compute_value(carry.copy())[
+                                "state_value"
+                            ]
+                            next_values = torch.cat(
+                                [values[:, 1:], last_value.unsqueeze(1)], dim=1
+                            )
+                            data_buf["next", "state_value"] = torch.where(
+                                data_buf["next", "done"],
+                                values,
+                                next_values,
+                            )
 
             rollout_time = rollout_timer.last_time
 

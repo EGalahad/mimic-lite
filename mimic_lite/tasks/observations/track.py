@@ -61,7 +61,7 @@ class _tracking_future_step_observation(TrackObservation):
         return torch.index_select(x, 1, self.future_step_indices)
 
 
-class ref_joint_pos_future(_tracking_future_step_observation, namespace="hdmi"):
+class ref_joint_pos_future(_tracking_future_step_observation, namespace="mimic_lite"):
     def __init__(self, env, noise_std=0.0, **kwargs):
         super().__init__(env, **kwargs)
         self.noise_std = noise_std
@@ -77,14 +77,14 @@ class ref_joint_pos_future(_tracking_future_step_observation, namespace="hdmi"):
         return joint_pos
 
 
-class ref_joint_vel_future(_tracking_future_step_observation, namespace="hdmi"):
+class ref_joint_vel_future(_tracking_future_step_observation, namespace="mimic_lite"):
     def compute(self):
         return self._select_future_steps(
             self.command_manager.ref_joint_vel_future_
         ).reshape(self.num_envs, -1)
 
 
-class ref_joint_action(TrackObservation, namespace="hdmi"):
+class ref_joint_action(TrackObservation, namespace="mimic_lite"):
     def __init__(self, env, **kwargs):
         super().__init__(env, **kwargs)
         action_manager = cast(JointPosition, self.env.action_manager)
@@ -110,7 +110,7 @@ class ref_joint_action(TrackObservation, namespace="hdmi"):
 
 # root_diff_obs
 
-class ref_root_pos_future_b(TrackObservation, namespace="hdmi"):
+class ref_root_pos_future_b(TrackObservation, namespace="mimic_lite"):
     """
     Reference root position in robot root frame
     """
@@ -119,7 +119,7 @@ class ref_root_pos_future_b(TrackObservation, namespace="hdmi"):
         return self.command_manager.ref_root_pos_future_b.view(self.num_envs, -1)
 
 
-class ref_root_ori_future_b(_tracking_future_step_observation, namespace="hdmi"):
+class ref_root_ori_future_b(_tracking_future_step_observation, namespace="mimic_lite"):
     """
     Reference root orientation in robot root frame
     """
@@ -204,7 +204,7 @@ class _motion_local_body_future_observation(_tracking_body_future_observation):
 
 
 class ref_body_pos_future_local(
-    _motion_local_body_future_observation, namespace="hdmi"
+    _motion_local_body_future_observation, namespace="mimic_lite"
 ):
     """
     Reference body position in the projected-yaw anchor frame.
@@ -225,7 +225,7 @@ class ref_body_pos_future_local(
 
 
 class ref_body_ori_future_local(
-    _motion_local_body_future_observation, namespace="hdmi"
+    _motion_local_body_future_observation, namespace="mimic_lite"
 ):
     """
     Reference body orientation in the projected-yaw anchor frame.
@@ -243,7 +243,7 @@ class _diff_body_future_observation(_tracking_body_future_observation):
 
 
 class diff_body_pos_future_local(
-    _diff_body_future_observation, namespace="hdmi"
+    _diff_body_future_observation, namespace="mimic_lite"
 ):
     """
     Reference body position in the projected-yaw anchor frame minus robot body position in the projected-yaw anchor frame.
@@ -256,7 +256,7 @@ class diff_body_pos_future_local(
 
 
 class diff_body_lin_vel_future(
-    _diff_body_future_observation, namespace="hdmi"
+    _diff_body_future_observation, namespace="mimic_lite"
 ):
     """
     Reference body linear velocity minus robot body linear velocity.
@@ -269,7 +269,7 @@ class diff_body_lin_vel_future(
 
 
 class diff_body_ori_future_local(
-    _diff_body_future_observation, namespace="hdmi"
+    _diff_body_future_observation, namespace="mimic_lite"
 ):
     """
     Reference body orientation in the projected-yaw anchor frame minus robot body orientation in the projected-yaw anchor frame.
@@ -282,7 +282,7 @@ class diff_body_ori_future_local(
 
 
 class diff_body_ang_vel_future(
-    _diff_body_future_observation, namespace="hdmi"
+    _diff_body_future_observation, namespace="mimic_lite"
 ):
     """
     Reference body angular velocity minus robot body angular velocity.
@@ -294,6 +294,11 @@ class diff_body_ang_vel_future(
         ).reshape(self.num_envs, -1)
 
 
-class ref_motion_phase(TrackObservation, namespace="hdmi"):
+class ref_motion_phase(TrackObservation, namespace="mimic_lite"):
     def compute(self):
         return (self.command_manager.obs_motion_t / self.command_manager.motion_len).unsqueeze(1)
+
+
+class motion_length(TrackObservation, namespace="mimic_lite"):
+    def compute(self):
+        return self.command_manager.motion_len.to(torch.float32).unsqueeze(1)

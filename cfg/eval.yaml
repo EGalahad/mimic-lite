@@ -22,9 +22,11 @@ eval_summary_output: eval_summary.json
 
 defaults:
   - task: lafan_100style_real
-  - algo: hdmi_ppo
+  - algo: mimic_lite_ppo
   - override /task/command/future_steps: short
   - _self_
 
 task:
   num_envs: 512
+  command:
+    start_from_zero: true

@@ -13,8 +13,8 @@ except ModuleNotFoundError:
     from mjlab.utils.lab_api import string as string_utils
 
 
-class JointPosition(Action, namespace="hdmi"):
-    """HDMI-style joint position controller with delay + smoothing."""
+class JointPosition(Action, namespace="mimic_lite"):
+    """mimic-lite-style joint position controller with delay + smoothing."""
 
     def __init__(
         self,

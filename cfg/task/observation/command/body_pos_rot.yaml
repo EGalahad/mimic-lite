@@ -1,16 +1,16 @@
 # @package task.observation.command
 
 ref_root_pos_future_local:
-  _target_: hdmi.ref_body_pos_future_local
+  _target_: mimic_lite.ref_body_pos_future_local
   body_names: "pelvis"
   noise_std: 0.005
 ref_root_ori_future_b:
-  _target_: hdmi.ref_root_ori_future_b
+  _target_: mimic_lite.ref_root_ori_future_b
   noise_std: 0.05
 
 ref_body_pos_future_local:
-  _target_: hdmi.ref_body_pos_future_local
+  _target_: mimic_lite.ref_body_pos_future_local
   body_names: [".*_knee_link", ".*_toe_link", ".*_shoulder_yaw_link", ".*_elbow_link", ".*_wrist_yaw_link"]
 ref_body_ori_future_local:
-  _target_: hdmi.ref_body_ori_future_local
+  _target_: mimic_lite.ref_body_ori_future_local
   body_names: [".*_knee_link", ".*_toe_link", ".*_shoulder_yaw_link", ".*_elbow_link", ".*_wrist_yaw_link"]

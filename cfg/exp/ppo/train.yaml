@@ -2,7 +2,7 @@
 
 defaults:
   - /algo/ppo/module: large
-  - override /algo: hdmi_ppo
+  - override /algo: mimic_lite_ppo
 
 total_iters: 4000
 checkpoint_interval: 1000
@@ -12,8 +12,8 @@ algo:
   freeze_vecnorm: false
   entropy_coef_start: 0.012
   entropy_coef_end: 0.001
-  entropy_decay_start: 2750
-  entropy_decay_end: 3000
+  entropy_decay_start: 3250
+  entropy_decay_end: 3500
 
 task:
   num_envs: 8192

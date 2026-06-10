@@ -56,14 +56,14 @@ Run single-stage PPO:
 
 ```bash
 bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=lafan_100style_real +exp=ppo/train backend=mjlab
+  task=lafan_sonic_100style_real +exp=ppo/train algo/ppo/module=residual backend=mjlab
 ```
 
 Run SAC:
 
 ```bash
 bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=lafan_100style_real +exp=sac/train backend=mjlab
+  task=lafan_sonic_100style_real +exp=sac/train backend=mjlab
 ```
 
 Run sequential PPO:

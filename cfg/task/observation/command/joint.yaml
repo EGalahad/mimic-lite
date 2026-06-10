@@ -1,12 +1,12 @@
 # @package task.observation.command
 
 ref_root_pos_future_local:
-  _target_: hdmi.ref_body_pos_future_local
+  _target_: mimic_lite.ref_body_pos_future_local
   body_names: "pelvis"
   noise_std: 0.005
 ref_root_ori_future_b:
-  _target_: hdmi.ref_root_ori_future_b
+  _target_: mimic_lite.ref_root_ori_future_b
   noise_std: 0.05
 
 ref_joint_pos_future:
-  _target_: hdmi.ref_joint_pos_future
+  _target_: mimic_lite.ref_joint_pos_future

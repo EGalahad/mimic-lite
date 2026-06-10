@@ -2,52 +2,52 @@
 
 # proprioception
 root_ang_vel_history:
-  _target_: hdmi.root_ang_vel_history
+  _target_: mimic_lite.root_ang_vel_history
   history_steps: [0, 1, 2, 3]
   noise_std: 0.0
 projected_gravity_history:
-  _target_: hdmi.projected_gravity_history
+  _target_: mimic_lite.projected_gravity_history
   history_steps: [0, 1, 2, 3]
   noise_std: 0.0
 joint_pos_history:
-  _target_: hdmi.joint_pos_history
+  _target_: mimic_lite.joint_pos_history
   history_steps: [0, 1, 2, 3]
   noise_std: 0.0
 joint_vel_history:
-  _target_: hdmi.joint_vel_history
+  _target_: mimic_lite.joint_vel_history
   history_steps: [0, 1, 2, 3]
   noise_std: 0.0
 
 # body state
 body_pos_b:
-  _target_: hdmi.body_pos_b
+  _target_: mimic_lite.body_pos_b
   body_names: ["pelvis", "torso_link", ".*_hip_yaw_link", ".*_knee_link", ".*_toe_link", ".*_shoulder_yaw_link", ".*_elbow_link", ".*_wrist_yaw_link"]
 body_vel_b:
-  _target_: hdmi.body_vel_b
+  _target_: mimic_lite.body_vel_b
   body_names: ["pelvis", "torso_link", ".*_hip_yaw_link", ".*_knee_link", ".*_toe_link", ".*_shoulder_yaw_link", ".*_elbow_link", ".*_wrist_yaw_link"]
 
 # root diff
 ref_root_pos_future_b:
-  _target_: hdmi.ref_root_pos_future_b
+  _target_: mimic_lite.ref_root_pos_future_b
 ref_root_ori_future_b:
-  _target_: hdmi.ref_root_ori_future_b
+  _target_: mimic_lite.ref_root_ori_future_b
 
 # body diff
 diff_body_pos_future_local:
-  _target_: hdmi.diff_body_pos_future_local
+  _target_: mimic_lite.diff_body_pos_future_local
   future_steps: [0, 1]
 diff_body_ori_future_local:
-  _target_: hdmi.diff_body_ori_future_local
+  _target_: mimic_lite.diff_body_ori_future_local
   future_steps: [0, 1]
 diff_body_lin_vel_future:
-  _target_: hdmi.diff_body_lin_vel_future
+  _target_: mimic_lite.diff_body_lin_vel_future
   future_steps: [0, 1]
 diff_body_ang_vel_future:
-  _target_: hdmi.diff_body_ang_vel_future
+  _target_: mimic_lite.diff_body_ang_vel_future
   future_steps: [0, 1]
 
 # actions
 applied_action:
-  _target_: hdmi.applied_action
+  _target_: mimic_lite.applied_action
 applied_torque:
-  _target_: hdmi.applied_torque
+  _target_: mimic_lite.applied_torque

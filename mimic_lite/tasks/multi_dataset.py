@@ -207,6 +207,10 @@ def load_motion_dataset_collection(
     create_dataset_fn: Callable[..., BaseDataset],
     target_fps: int,
     num_envs: int,
+    body_names: list[str] | None = None,
+    joint_names: list[str] | None = None,
+    windowed_next_window_device: str | None = "current",
+    windowed_pin_window_load: bool = True,
 ) -> BaseDataset:
     datasets = [
         create_dataset_fn(
@@ -214,6 +218,10 @@ def load_motion_dataset_collection(
             target_fps=target_fps,
             num_envs=num_envs,
             full_motion=cfg.full_motion,
+            body_names=body_names,
+            joint_names=joint_names,
+            windowed_next_window_device=windowed_next_window_device,
+            windowed_pin_window_load=windowed_pin_window_load,
         )
         for cfg in motion_cfgs
     ]
@@ -270,11 +278,20 @@ class WeightedMultiMotionDataset(BaseDataset):
 
         motion_id_offsets: list[int] = []
         motion_id_ends: list[int] = []
+        motion_route_offsets: list[int] = []
+        motion_route_ends: list[int] = []
         current_offset = 0
+        current_route_offset = 0
         for dataset in self.datasets:
             motion_id_offsets.append(current_offset)
             current_offset += int(dataset.num_motions)
             motion_id_ends.append(current_offset)
+            motion_route_offsets.append(current_route_offset)
+            route_span = int(dataset.num_motions)
+            if hasattr(dataset, "_current_window"):
+                route_span = max(route_span, self.num_envs)
+            current_route_offset += route_span
+            motion_route_ends.append(current_route_offset)
         self._motion_id_offsets = torch.tensor(
             motion_id_offsets,
             device=self.device,
@@ -282,6 +299,16 @@ class WeightedMultiMotionDataset(BaseDataset):
         )
         self._motion_id_ends = torch.tensor(
             motion_id_ends,
+            device=self.device,
+            dtype=torch.long,
+        )
+        self._motion_route_offsets = torch.tensor(
+            motion_route_offsets,
+            device=self.device,
+            dtype=torch.long,
+        )
+        self._motion_route_ends = torch.tensor(
+            motion_route_ends,
             device=self.device,
             dtype=torch.long,
         )
@@ -312,6 +339,8 @@ class WeightedMultiMotionDataset(BaseDataset):
         self._env_dataset_id = self._env_dataset_id.to(target_device)
         self._motion_id_offsets = self._motion_id_offsets.to(target_device)
         self._motion_id_ends = self._motion_id_ends.to(target_device)
+        self._motion_route_offsets = self._motion_route_offsets.to(target_device)
+        self._motion_route_ends = self._motion_route_ends.to(target_device)
         self.starts = self.starts.to(target_device)
         self.ends = self.ends.to(target_device)
         self.lengths = self.lengths.to(target_device)
@@ -339,7 +368,7 @@ class WeightedMultiMotionDataset(BaseDataset):
                 profile_name=profile_name,
             )
 
-        dataset_ids = torch.bucketize(motion_ids, self._motion_id_ends, right=True)
+        dataset_ids = torch.bucketize(motion_ids, self._motion_route_ends, right=True)
         slice_parts = []
         slice_positions = []
         for dataset_index, dataset in enumerate(self.datasets):
@@ -349,9 +378,10 @@ class WeightedMultiMotionDataset(BaseDataset):
             ).squeeze(-1)
             if member_positions.numel() == 0:
                 continue
-            local_motion_ids = motion_ids.index_select(0, member_positions) - self._motion_id_offsets[
-                dataset_index
-            ]
+            local_motion_ids = (
+                motion_ids.index_select(0, member_positions)
+                - self._motion_route_offsets[dataset_index]
+            )
             part = dataset.get_slice(
                 local_motion_ids,
                 starts.index_select(0, member_positions),
@@ -417,7 +447,7 @@ class WeightedMultiMotionDataset(BaseDataset):
                 0,
                 member_positions,
                 sampled.motion_id.to(device=self.device, dtype=torch.long)
-                + self._motion_id_offsets[dataset_index],
+                + self._motion_route_offsets[dataset_index],
             )
             motion_lens.index_copy_(
                 0,

@@ -29,6 +29,10 @@ def create_dataset_from_path(
     target_fps: int = 50,
     num_envs: int = 1,
     full_motion: bool = True,
+    body_names: list[str] | None = None,
+    joint_names: list[str] | None = None,
+    windowed_next_window_device: str | torch.device | None = "current",
+    windowed_pin_window_load: bool = True,
 ) -> Any4HDMIBaseDataset:
     import active_adaptation
 
@@ -39,6 +43,10 @@ def create_dataset_from_path(
         base_dir=base_dir,
         num_envs=num_envs,
         full_motion=full_motion,
+        body_names=body_names,
+        joint_names=joint_names,
+        windowed_next_window_device=windowed_next_window_device,
+        windowed_pin_window_load=windowed_pin_window_load,
     )
     if not isinstance(dataset, Any4HDMIBaseDataset):
         raise TypeError(
@@ -90,8 +98,8 @@ def _validate_motion_dataset(dataset: Any4HDMIBaseDataset) -> None:
         print("Motion dataset validation skipped: dataset is empty")
         return
 
-    chunk_size = _env_int("HDMI_MOTION_VALIDATE_CHUNK_SIZE", MOTION_DATASET_VALIDATE_CHUNK_SIZE)
-    quat_norm_atol = float(os.environ.get("HDMI_MOTION_VALIDATE_QUAT_NORM_ATOL", MOTION_DATASET_QUAT_NORM_ATOL))
+    chunk_size = _env_int("MIMIC_LITE_MOTION_VALIDATE_CHUNK_SIZE", MOTION_DATASET_VALIDATE_CHUNK_SIZE)
+    quat_norm_atol = float(os.environ.get("MIMIC_LITE_MOTION_VALIDATE_QUAT_NORM_ATOL", MOTION_DATASET_QUAT_NORM_ATOL))
     violation_counts = {
         "joint_pos_abs": 0,
         "joint_vel_abs": 0,

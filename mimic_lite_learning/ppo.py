@@ -82,10 +82,53 @@ class ResidualActorFeatureGate(nn.Module):
         return base_feature + alpha * residual_feature
 
 
+class RolloutActorAutocast(nn.Module):
+    def __init__(
+        self,
+        actor: ProbabilisticActor,
+        *,
+        dist_cls: type[D.Distribution],
+        dist_keys: tuple[str, ...],
+        dtype: torch.dtype,
+    ) -> None:
+        super().__init__()
+        self.actor = actor
+        self.dist_cls = dist_cls
+        self.dist_keys = dist_keys
+        self.dtype = dtype
+        self.in_keys = actor.in_keys
+        self.out_keys = [f"{ACTION_KEY}_log_prob", ACTION_KEY] + list(dist_keys)
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        actor = self.actor.module if isinstance(self.actor, DDP) else self.actor
+        actor_module = (
+            actor.module[0] if isinstance(actor.module, nn.ModuleList) else actor.module
+        )
+        device_type = next(actor_module.parameters()).device.type
+
+        with torch.no_grad(), torch.autocast(
+            device_type=device_type,
+            dtype=self.dtype,
+            enabled=device_type == "cuda",
+        ):
+            actor_module(tensordict)
+
+        for key in self.dist_keys:
+            tensordict.set(key, tensordict[key].float())
+
+        dist_now = self.dist_cls(**tensordict.select(*self.dist_keys))
+        action = dist_now.sample()
+        with set_composite_lp_aggregate(True):
+            log_prob = dist_now.log_prob(action)
+        tensordict.set(ACTION_KEY, action.float())
+        tensordict.set(f"{ACTION_KEY}_log_prob", log_prob.float())
+        return tensordict
+
+
 @dataclass
 class PPOConfig:
     _target_: str = f"{__package__}.ppo.PPOPolicy"
-    name: str = "hdmi_ppo"
+    name: str = "mimic_lite_ppo"
     train_every: int = 32
     ppo_epochs: int = 3
     num_minibatches: int = 8
@@ -124,7 +167,9 @@ class PPOConfig:
 
     grad_sync_mode: str | None = "manual"
     manual_construct_dist_now: bool = True
-
+    value_chunk_size: int | None = 65536
+    rollout_amp_dtype: str | None = None
+    
     def __post_init__(self):
         if isinstance(self.opt, str):
             self.opt = self.opt.lower()
@@ -150,9 +195,32 @@ class PPOConfig:
                 "actor_hidden_dims must be non-empty."
             )
 
+        if self.value_chunk_size is not None:
+            self.value_chunk_size = int(self.value_chunk_size)
+            if self.value_chunk_size <= 0:
+                self.value_chunk_size = None
+
+        if isinstance(self.rollout_amp_dtype, str):
+            self.rollout_amp_dtype = self.rollout_amp_dtype.lower()
+            if self.rollout_amp_dtype in {"none", "null", "false", "0"}:
+                self.rollout_amp_dtype = None
+
+        if self.rollout_amp_dtype not in {
+            "bf16",
+            "bfloat16",
+            "fp16",
+            "float16",
+            None,
+        }:
+            raise ValueError(
+                "rollout_amp_dtype must be one of {'bf16', 'bfloat16', "
+                "'fp16', 'float16', None}, "
+                f"got {self.rollout_amp_dtype!r}"
+            )
+
 
 cs = ConfigStore.instance()
-cs.store("hdmi_ppo", node=PPOConfig, group="algo")
+cs.store("mimic_lite_ppo", node=PPOConfig, group="algo")
 
 
 class PPOPolicy(PPOBase):
@@ -355,6 +423,47 @@ class PPOPolicy(PPOBase):
         self.vecnorm(tensordict)
         return self.critic(tensordict)
 
+    @torch.no_grad()
+    def _critic_values_chunked(self, tensordict: TensorDict) -> torch.Tensor:
+        tensordict_flat = tensordict.view(-1)
+        numel = tensordict_flat.numel()
+        chunk_size = self.cfg.value_chunk_size
+
+        if chunk_size is None or numel <= chunk_size:
+            values = self.critic(tensordict_flat)["state_value"]
+            return values.view(*tensordict.batch_size, *values.shape[1:])
+
+        values_flat = None
+        for start in range(0, numel, chunk_size):
+            end = min(start + chunk_size, numel)
+            chunk = tensordict_flat[start:end]
+            chunk_values = self.critic(chunk)["state_value"]
+            if values_flat is None:
+                values_flat = chunk_values.new_empty(
+                    (numel, *chunk_values.shape[1:])
+                )
+            values_flat[start:end].copy_(chunk_values)
+
+        assert values_flat is not None
+        return values_flat.view(*tensordict.batch_size, *values_flat.shape[1:])
+
+    @VecNorm.freeze()
+    @torch.no_grad()
+    def compute_rollout_values(self, tensordict: TensorDict, carry: TensorDict):
+        values = self._critic_values_chunked(tensordict)
+        last_value = self.compute_value(carry)["state_value"]
+
+        next_values = torch.empty_like(values)
+        next_values[:, :-1].copy_(values[:, 1:])
+        next_values[:, -1].copy_(last_value)
+
+        tensordict.set("state_value", values)
+        tensordict.set(
+            ("next", "state_value"),
+            torch.where(tensordict["next", "done"], values, next_values),
+        )
+        return tensordict
+
     def _wrap_ddp(self, local_rank: int):
         ddp_kwargs = dict(
             device_ids=[local_rank],
@@ -414,7 +523,20 @@ class PPOPolicy(PPOBase):
             modules.append(MeanAction())
             out_keys = [ACTION_KEY]
         else:
-            modules = [self.vecnorm, self.actor]
+            actor = self.actor
+            if self.cfg.rollout_amp_dtype is not None:
+                dtype = (
+                    torch.bfloat16
+                    if self.cfg.rollout_amp_dtype in {"bf16", "bfloat16"}
+                    else torch.float16
+                )
+                actor = RolloutActorAutocast(
+                    self.actor,
+                    dist_cls=self.dist_cls,
+                    dist_keys=tuple(self.dist_keys),
+                    dtype=dtype,
+                )
+            modules = [self.vecnorm, actor]
             out_keys = [f"{ACTION_KEY}_log_prob", ACTION_KEY] + self.dist_keys
 
         rollout_policy = Seq(*modules, selected_out_keys=out_keys)
@@ -559,9 +681,18 @@ class PPOPolicy(PPOBase):
             with ScopedTimer(
                 "training.policy.adv.critic_forward", sync=PROFILE_SYNC_TIMERS
             ):
-                with tensordict.view(-1) as tensordict_flat:
-                    critic(tensordict_flat)
-                    critic(tensordict_flat["next"])
+                if critic is self.critic:
+                    tensordict.set(
+                        "state_value", self._critic_values_chunked(tensordict)
+                    )
+                    tensordict.set(
+                        ("next", "state_value"),
+                        self._critic_values_chunked(tensordict["next"]),
+                    )
+                else:
+                    with tensordict.view(-1) as tensordict_flat:
+                        critic(tensordict_flat)
+                        critic(tensordict_flat["next"])
 
         values = tensordict["state_value"]
         next_values = tensordict["next", "state_value"]

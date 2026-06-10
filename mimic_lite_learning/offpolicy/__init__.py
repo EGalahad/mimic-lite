@@ -1,2 +1,2 @@
-"""Shared off-policy components for HDMI algorithms."""
+"""Shared off-policy components for mimic-lite algorithms."""
 

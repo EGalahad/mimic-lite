@@ -1,0 +1,44 @@
+# @package task.termination
+
+# episode boundary
+motion_timeout:
+  is_timeout: true
+
+# root tracking
+root_pos_error:
+  _target_: cum_body_pos_error
+  body_names: ${task.shared.termination_root_body_name}
+  min_steps: 25
+  threshold: 0.4
+  is_timeout: true
+  enabled: true
+
+# root_linvel_error:
+#   _target_: cum_body_lin_vel_error
+#   body_names: ${task.shared.termination_root_body_name}
+#   min_steps: 25
+#   threshold: 1.0
+# root_angvel_error:
+#   _target_: cum_body_ang_vel_error
+#   body_names: ${task.shared.termination_root_body_name}
+#   min_steps: 25
+#   threshold: 2.5
+
+root_ori_error:
+  _target_: cum_body_ori_error
+  body_names: ${task.shared.termination_root_body_name}
+  min_steps: 25
+  threshold: 1.2
+
+# body tracking
+body_pos_error:
+  _target_: cum_body_pos_error_local
+  body_names: ${task.shared.tracking_body_names}
+  min_steps: 5
+  threshold: 0.4
+
+body_ori_error:
+  _target_: cum_body_ori_error_local
+  body_names: ${task.shared.tracking_body_names}
+  min_steps: 5
+  threshold: 1.2

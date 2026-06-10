@@ -1,1 +1,1 @@
-"""SAC helper modules for the HDMI learning package."""
+"""SAC helper modules for the mimic-lite learning package."""

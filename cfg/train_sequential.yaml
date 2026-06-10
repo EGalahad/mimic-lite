@@ -7,7 +7,7 @@ hydra:
 headless: true
 exp_name: ${oc.select:task.name,test}-${oc.select:algo.name,none}
 
-backend: isaac
+backend: mjlab
 device: cuda
 
 app:

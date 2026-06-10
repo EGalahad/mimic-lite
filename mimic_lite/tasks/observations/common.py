@@ -1,4 +1,4 @@
-"""Common observation aliases for HDMI tasks."""
+"""Common observation aliases for mimic-lite tasks."""
 
 import torch
 from typing import cast
@@ -8,7 +8,7 @@ from active_adaptation.envs.utils import find_bodies, find_joints
 from active_adaptation.utils.math import quat_rotate_inverse
 from mimic_lite.tasks.actions import JointPosition
 
-if aa.get_backend() == "isaac":
+if aa.get_backend() == "isaaclab":
     from isaaclab.assets import ArticulationData
 elif aa.get_backend() == "mjlab":
     from mjlab.entity import EntityData
@@ -28,7 +28,7 @@ def _get_simulation_body_selection(asset, body_names: str, device: torch.device)
     return torch.as_tensor(body_ids, device=device), body_names
 
 
-class root_ang_vel_history(BaseObservation, namespace="hdmi"):
+class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env, noise_std: float = 0.0, history_steps: list[int] = [1]):
         super().__init__(env)
         self.asset = self.env.scene.articulations["robot"]
@@ -59,7 +59,7 @@ class root_ang_vel_history(BaseObservation, namespace="hdmi"):
         return self.buffer[:, indices].reshape(self.num_envs, -1)
 
 
-class projected_gravity_history(BaseObservation, namespace="hdmi"):
+class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env, noise_std: float = 0.0, history_steps: list[int] = [1]):
         super().__init__(env)
         self.asset = self.env.scene.articulations["robot"]
@@ -92,7 +92,7 @@ class projected_gravity_history(BaseObservation, namespace="hdmi"):
         return self.buffer[:, indices].reshape(self.num_envs, -1)
 
 
-class joint_pos_history(BaseObservation, namespace="hdmi"):
+class joint_pos_history(BaseObservation, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -144,7 +144,7 @@ class joint_pos_history(BaseObservation, namespace="hdmi"):
         joint_pos_selected = joint_pos[:, indices]
         return joint_pos_selected.reshape(self.num_envs, -1)
 
-class joint_vel_history(BaseObservation, namespace="hdmi"):
+class joint_vel_history(BaseObservation, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -189,7 +189,7 @@ class joint_vel_history(BaseObservation, namespace="hdmi"):
         joint_vel_selected = joint_vel[:, indices]
         return joint_vel_selected.reshape(self.num_envs, -1)
 
-class applied_action(BaseObservation, namespace="hdmi"):
+class applied_action(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env):
         super().__init__(env)
         self.action_manager = cast(JointPosition, self.env.input_managers["action"])
@@ -198,7 +198,7 @@ class applied_action(BaseObservation, namespace="hdmi"):
         return self.action_manager.applied_action
 
 
-class prev_actions(BaseObservation, namespace="hdmi"):
+class prev_actions(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env, key: str = "action", steps: int = 1):
         super().__init__(env)
         self.steps = steps
@@ -209,7 +209,7 @@ class prev_actions(BaseObservation, namespace="hdmi"):
         return action_buf.reshape(self.num_envs, -1)
 
 
-class body_pos_b(BaseObservation, namespace="hdmi"):
+class body_pos_b(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env, body_names: str):
         super().__init__(env)
         self.asset = self.env.scene.articulations["robot"]
@@ -234,7 +234,7 @@ class body_pos_b(BaseObservation, namespace="hdmi"):
         return body_pos_b.reshape(self.num_envs, -1)
 
 
-class body_vel_b(BaseObservation, namespace="hdmi"):
+class body_vel_b(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env, body_names: str):
         super().__init__(env)
         self.asset = self.env.scene.articulations["robot"]
@@ -256,7 +256,7 @@ class body_vel_b(BaseObservation, namespace="hdmi"):
         return body_lin_vel_b.reshape(self.num_envs, -1)
 
 
-class applied_torque(BaseObservation, namespace="hdmi"):
+class applied_torque(BaseObservation, namespace="mimic_lite"):
     def __init__(self, env, joint_names: str = ".*"):
         super().__init__(env)
         self.asset = self.env.scene.articulations["robot"]
@@ -267,7 +267,7 @@ class applied_torque(BaseObservation, namespace="hdmi"):
         )
 
     def compute(self):
-        if aa.get_backend() == "isaac":
+        if aa.get_backend() == "isaaclab":
             asset_data = cast(ArticulationData, self.asset.data)
             applied_torque = asset_data.applied_torque
         else:

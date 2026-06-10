@@ -321,7 +321,7 @@ class ResetProfileStats:
     max_reset_t_seen: int = 0
 
 
-class RobotTracking(Command, namespace="hdmi"):
+class RobotTracking(Command, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -354,9 +354,12 @@ class RobotTracking(Command, namespace="hdmi"):
         future_steps: List[int] = [1, 2, 8, 16],
         diff_future_steps: List[int] = [0, 1],
         anchor_body_name: str = "torso_link",
+        windowed_next_window_device: str | None = "current",
+        windowed_pin_window_load: bool = True,
         call_update: bool = True,
         replay_motion: bool = False,
         record_motion: bool = False,
+        start_from_zero: bool = False,
         rewind_prob: float = 0.0,
         rewind_steps_range: Tuple[int, int] = (25, 125),
         viz: VizCfg | Dict | None = None,
@@ -366,34 +369,60 @@ class RobotTracking(Command, namespace="hdmi"):
 
         super().__init__(env)
         self.motion_cfgs: list[MotionDatasetConfig] = normalize_motion_cfgs(motion_cfgs)
+
+        # Resolve the exact asset names before loading motion data so large
+        # windowed datasets can skip body/joint fields this task never reads.
+        tracking_body_indices_asset, self.tracking_body_names = find_bodies(
+            self.asset, tracking_body_names
+        )
+        if obs_body_names is None:
+            obs_body_names = self.tracking_body_names
+        _, self.obs_body_names = find_bodies(self.asset, obs_body_names)
+        tracking_joint_indices_asset, self.tracking_joint_names = find_joints(
+            self.asset, tracking_joint_names
+        )
+
+        env_next_window_device = os.environ.get("ANY4HDMI_NEXT_WINDOW_DEVICE")
+        if env_next_window_device:
+            windowed_next_window_device = env_next_window_device
+        if os.environ.get("ANY4HDMI_PIN_WINDOW_LOAD", "0") == "1":
+            windowed_pin_window_load = True
+
+        motion_body_names = list(dict.fromkeys([
+            *self.tracking_body_names,
+            root_body_name,
+            anchor_body_name,
+        ]))
+        motion_joint_names = list(self.asset.joint_names)
+
         self.dataset = load_motion_dataset_collection(
             self.motion_cfgs,
             create_dataset_fn=create_dataset_from_path,
             target_fps=int(1 / self.env.step_dt),
             num_envs=self.num_envs,
+            body_names=motion_body_names,
+            joint_names=motion_joint_names,
+            windowed_next_window_device=windowed_next_window_device,
+            windowed_pin_window_load=windowed_pin_window_load,
         ).to(self.device)
+        print(
+            "[mimic_lite][motion_dataset]"
+            f" pruned bodies={len(self.dataset.body_names)}"
+            f" joints={len(self.dataset.joint_names)}"
+        )
 
         # Set tracking body and joint names for observation and termination
-        tracking_body_indices_asset, self.tracking_body_names = find_bodies(
-            self.asset, tracking_body_names
-        )
         self.tracking_body_indices_motion = [
             self.dataset.body_names.index(name) for name in self.tracking_body_names
         ]
         self.tracking_body_indices_asset = list(tracking_body_indices_asset)
 
-        if obs_body_names is None:
-            obs_body_names = self.tracking_body_names
-        _, self.obs_body_names = find_bodies(self.asset, obs_body_names)
         self.obs_body_indices_tracking = torch.tensor(
             [self.tracking_body_names.index(name) for name in self.obs_body_names],
             dtype=torch.long,
             device=self.device,
         )
 
-        tracking_joint_indices_asset, self.tracking_joint_names = find_joints(
-            self.asset, tracking_joint_names
-        )
         self.tracking_joint_indices_motion = [
             self.dataset.joint_names.index(name) for name in self.tracking_joint_names
         ]
@@ -486,15 +515,13 @@ class RobotTracking(Command, namespace="hdmi"):
         assert self.rewind_steps_range[0] >= 0
         assert self.rewind_steps_range[1] > self.rewind_steps_range[0]
 
-        if replay_motion:
-            raise NotImplementedError(
-                "replay_motion reset sampling is no longer supported on this command path"
-            )
         self.first_sample_motion = True
         self.record_motion = record_motion
-        self._profile_resets = os.environ.get("HDMI_PROFILE_RESETS", "0") == "1"
+        self.replay_motion = replay_motion
+        self.start_from_zero = start_from_zero
+        self._profile_resets = os.environ.get("MIMIC_LITE_PROFILE_RESETS", "0") == "1"
         self._profile_resets_print_every = max(
-            1, int(os.environ.get("HDMI_PROFILE_RESETS_PRINT_EVERY", "10"))
+            1, int(os.environ.get("MIMIC_LITE_PROFILE_RESETS_PRINT_EVERY", "10"))
         )
         self._reset_profile_stats = ResetProfileStats()
 
@@ -540,7 +567,7 @@ class RobotTracking(Command, namespace="hdmi"):
             rewind_mask=rewind_mask,
             rewind_steps=rewind_steps,
         )
-        if not self.env.training:
+        if self.start_from_zero or self.replay_motion:
             sampled_motion.start_t.fill_(0)
         self.motion_ids[env_ids] = sampled_motion.motion_id
         self.motion_len[env_ids] = sampled_motion.motion_len
@@ -574,7 +601,7 @@ class RobotTracking(Command, namespace="hdmi"):
             (len(env_ids), 6),
             device=self.device,
         )
-        if not self.env.training:
+        if not self.env.training or self.replay_motion:
             pose_rand_samples.fill_(0.0)
         positions = (
             init_root_pos
@@ -593,7 +620,7 @@ class RobotTracking(Command, namespace="hdmi"):
             (len(env_ids), 6),
             device=self.device,
         )
-        if not self.env.training:
+        if not self.env.training or self.replay_motion:
             vel_rand_samples.fill_(0.0)
         velocities = (
             torch.cat([init_root_lin_vel, init_root_ang_vel], dim=-1) + vel_rand_samples
@@ -663,7 +690,7 @@ class RobotTracking(Command, namespace="hdmi"):
                 else "legacy_npz"
             )
         print(
-            "[hdmi][reset_profile]"
+            "[mimic_lite][reset_profile]"
             f" dataset={dataset_kind}"
             f" calls={stats.calls}"
             f" envs_total={stats.envs_total}"
@@ -676,7 +703,7 @@ class RobotTracking(Command, namespace="hdmi"):
     def _write_root_com_velocity(
         self, root_com_velocity: torch.Tensor, env_ids: torch.Tensor
     ) -> None:
-        if self.env.backend == "isaac":
+        if self.env.backend == "isaaclab":
             self.asset.write_root_com_velocity_to_sim(
                 root_com_velocity, env_ids=env_ids
             )
@@ -871,6 +898,46 @@ class RobotTracking(Command, namespace="hdmi"):
         self.t += 1
 
     def update(self):
+        if self.replay_motion:
+            # Set the full robot state to the reference frame used for replay.
+            env_ids = self.all_env_ids
+            time_index = self.obs_current_step_index
+            self.asset.write_root_link_pose_to_sim(
+                torch.cat(
+                    [
+                        self.ref_root_pos_future_w[:, time_index],
+                        self.ref_root_quat_future_w[:, time_index],
+                    ],
+                    dim=-1,
+                ),
+                env_ids=env_ids,
+            )
+            self._write_root_com_velocity(
+                torch.cat(
+                    [
+                        self.future_ref_motion.body_lin_vel_w[
+                            :, time_index, self.root_body_idx_motion
+                        ],
+                        self.future_ref_motion.body_ang_vel_w[
+                            :, time_index, self.root_body_idx_motion
+                        ],
+                    ],
+                    dim=-1,
+                ),
+                env_ids=env_ids,
+            )
+            self.asset.write_joint_state_to_sim(
+                self.future_ref_motion.joint_pos[
+                    :, time_index, self.asset_joint_idx_motion
+                ],
+                self.future_ref_motion.joint_vel[
+                    :, time_index, self.asset_joint_idx_motion
+                ],
+                env_ids=env_ids,
+            )
+            if self.env.backend == "mjlab":
+                self.env.sim.forward()
+
         if hasattr(self, "motion_frames"):
             with ScopedTimer("command_update.record_motion", sync=False):
                 motion_frame = {}

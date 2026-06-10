@@ -2,7 +2,7 @@
 
 defaults:
   - /algo/sac/module: large
-  - override /algo: sac
+  - override /algo: mimic_lite_sac
 
 total_iters: 5000
 checkpoint_interval: 1000
@@ -19,4 +19,4 @@ algo:
   actor_batch_size: 4096
 
 task:
-  num_envs: 4096
+  num_envs: 8192

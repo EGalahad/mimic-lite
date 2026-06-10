@@ -1,0 +1,30 @@
+# @package task.termination
+
+motion_timeout:
+  is_timeout: true
+
+root_pos_error:
+  _target_: cum_body_pos_error
+  body_names: ${task.shared.termination_root_body_name}
+  min_steps: 25
+  threshold: 0.4
+  is_timeout: true
+  enabled: true
+
+body_z_error:
+  _target_: cum_body_z_error
+  body_names: ["${task.shared.termination_root_body_name}", ".*_toe_link", ".*_wrist_yaw_link"]
+  min_steps: 1
+  threshold: 0.15
+
+root_ori_error:
+  _target_: cum_body_ori_error
+  body_names: ["${task.shared.termination_root_body_name}"]
+  min_steps: 1
+  threshold: 0.2
+
+foot_pos_error:
+  _target_: cum_body_pos_error_local
+  body_names: [".*_toe_link"]
+  min_steps: 1
+  threshold: 0.2

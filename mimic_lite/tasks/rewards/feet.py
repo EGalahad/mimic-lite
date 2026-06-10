@@ -1,4 +1,4 @@
-"""Feet-related reward aliases for HDMI tasks."""
+"""Feet-related reward aliases for mimic-lite tasks."""
 
 import active_adaptation as aa
 from mimic_lite.tasks.command import RobotTracking
@@ -7,7 +7,7 @@ from active_adaptation.envs.utils import find_bodies, find_sensor_bodies
 from typing import TYPE_CHECKING, cast
 import torch
 
-if aa.get_backend() == "isaac":
+if aa.get_backend() == "isaaclab":
     from isaaclab.sensors import ContactSensor as IsaacContactSensor
 elif aa.get_backend() == "mjlab":
     from mjlab.sensor import ContactSensor as MJLabContactSensor
@@ -35,7 +35,7 @@ def _select_tracking_body_names(
 
 def _current_in_contact(contact_sensor, body_ids: torch.Tensor) -> torch.Tensor:
     """Return [N, B] in-contact mask using the configured history window."""
-    if aa.get_backend() == "isaac":
+    if aa.get_backend() == "isaaclab":
         contact_sensor = cast(IsaacContactSensor, contact_sensor)
     elif aa.get_backend() == "mjlab":
         contact_sensor = cast(MJLabContactSensor, contact_sensor)
@@ -56,7 +56,7 @@ def _current_in_contact(contact_sensor, body_ids: torch.Tensor) -> torch.Tensor:
     raise RuntimeError("Contact sensor does not expose usable contact fields.")
 
 
-class feet_slip(TrackReward, namespace="hdmi"):
+class feet_slip(TrackReward, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -94,8 +94,8 @@ class feet_slip(TrackReward, namespace="hdmi"):
         return -slip
 
 
-class feet_air_time(TrackReward, namespace="hdmi"):
-    supported_backends = ("isaac", "mjlab")
+class feet_air_time(TrackReward, namespace="mimic_lite"):
+    supported_backends = ("isaaclab", "mjlab")
 
     def __init__(
         self,
@@ -212,7 +212,7 @@ class feet_air_time(TrackReward, namespace="hdmi"):
         in_air = ~self.current_contact
         air_ratio = self.air_ratio
 
-        if aa.get_backend() == "isaac":
+        if aa.get_backend() == "isaaclab":
             debug_draw = getattr(self.env, "debug_draw", None)
             if debug_draw is None:
                 return
@@ -275,8 +275,8 @@ class feet_air_time(TrackReward, namespace="hdmi"):
                     )
 
 
-class feet_contact_count(TrackReward, namespace="hdmi"):
-    supported_backends = ("isaac", "mjlab")
+class feet_contact_count(TrackReward, namespace="mimic_lite"):
+    supported_backends = ("isaaclab", "mjlab")
 
     def __init__(self, env, body_names: str, weight: float, enabled: bool = True):
         super().__init__(env, weight=weight, enabled=enabled)
@@ -311,8 +311,8 @@ class feet_contact_count(TrackReward, namespace="hdmi"):
         return self.is_first_contact.float().mean(1, keepdim=True)
 
 
-class feet_contact_duration(TrackReward, namespace="hdmi"):
-    supported_backends = ("isaac", "mjlab")
+class feet_contact_duration(TrackReward, namespace="mimic_lite"):
+    supported_backends = ("isaaclab", "mjlab")
 
     def __init__(self, env, body_names: str, weight: float, enabled: bool = True):
         super().__init__(env, weight=weight, enabled=enabled)

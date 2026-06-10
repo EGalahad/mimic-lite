@@ -84,7 +84,7 @@ def _init_sac_linear(m: nn.Module, gain: float = 1.0):
 @dataclass
 class SACConfig:
     _target_: str = "mimic_lite_learning.sac.SAC"
-    name: str = "sac"
+    name: str = "mimic_lite_sac"
     train_every: int = 4
     buffer_size: int = 2000
     buffer_device: str = "cpu"
@@ -209,7 +209,7 @@ def _same_width_residual_stack(
     return nn.Sequential(*layers)
 
 
-cs.store(name="sac", node=SACConfig, group="algo")
+cs.store(name="mimic_lite_sac", node=SACConfig, group="algo")
 
 
 def _normalize_grad_sync_mode(mode: str | None) -> str | None:

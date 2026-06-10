@@ -18,14 +18,12 @@ any4hdmi = { path = "../../../any4hdmi", editable = true }
 
 [project.entry-points."active_adaptation.projects"]
 mimic_lite = "mimic_lite"
-hdmi = "hdmi"
 
 [project.entry-points."active_adaptation.learning"]
 mimic_lite = "mimic_lite_learning"
-hdmi = "hdmi_learning"
 
 [tool.setuptools.packages]
-find = { where = ["."], include = ["mimic_lite*", "mimic_lite_learning*", "hdmi", "hdmi_learning"] }
+find = { where = ["."], include = ["mimic_lite*", "mimic_lite_learning*"] }
 
 [tool.setuptools.package-data]
 "*" = ["**/*"]

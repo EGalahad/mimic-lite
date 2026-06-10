@@ -1,7 +1,7 @@
 """
-Play and export policy for HDMI project.
+Play and export policy for mimic-lite project.
 
-This script mirrors the full export behavior from HDMI/scripts/play.py:
+This script provides the mimic-lite policy export behavior:
 - export traced policy as .pt
 - export ONNX as .onnx
 - export deploy config as .yaml
@@ -186,6 +186,8 @@ def main(cfg: DictConfig):
 
     if cfg.get("export_policy", False):
         export_policy(cfg, env, policy)
+        if cfg.get("export_only", False):
+            return
 
     stats_keys = [
         k

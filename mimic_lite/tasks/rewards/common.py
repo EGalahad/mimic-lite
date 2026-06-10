@@ -1,4 +1,4 @@
-"""Common reward aliases for HDMI tasks."""
+"""Common reward aliases for mimic-lite tasks."""
 
 from active_adaptation.envs.mdp.rewards.base import Reward as BaseReward
 from active_adaptation.envs.utils import find_joints
@@ -10,7 +10,7 @@ if TYPE_CHECKING:
     from isaaclab.sensors import ContactSensor as IsaacContactSensor
 
 
-class joint_pos_limits(BaseReward, namespace="hdmi"):
+class joint_pos_limits(BaseReward, namespace="mimic_lite"):
     def __init__(
         self,
         env,
@@ -37,7 +37,7 @@ class joint_pos_limits(BaseReward, namespace="hdmi"):
         return -(violation_min + violation_max).sum(dim=1, keepdim=True)
 
 
-# class joint_torque_limits(BaseReward, namespace="hdmi"):
+# class joint_torque_limits(BaseReward, namespace="mimic_lite"):
 #     def __init__(
 #         self,
 #         env,
@@ -70,7 +70,7 @@ class joint_pos_limits(BaseReward, namespace="hdmi"):
 #         return -(violation_high + violation_low).sum(dim=1, keepdim=True)
 
 
-class self_collisions(BaseReward, namespace="hdmi"):
+class self_collisions(BaseReward, namespace="mimic_lite"):
     def __init__(
         self,
         env,

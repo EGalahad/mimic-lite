@@ -7,7 +7,7 @@ hydra:
 headless: true
 exp_name: ${oc.select:task.name,test}-${oc.select:algo.name,none}
 
-backend: isaac
+backend: mjlab
 device: cuda
 
 app:
@@ -33,12 +33,12 @@ camera_follow: true
 wandb:
   name: ${..exp_name}/${now:%m-%d}_${now:%H-%M}
   job_type: train
-  project: hdmi
+  project: mimic_lite
   mode: online # set to 'disabled' when debugging locally
   id: null
   tags: []
 
 defaults:
   - task: lafan_100style_real
-  - algo: hdmi_ppo
+  - algo: mimic_lite_ppo
   - _self_
