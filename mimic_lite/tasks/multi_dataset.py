@@ -16,6 +16,8 @@ class MotionDatasetConfig:
     path: str | list[str]
     weight: float
     full_motion: bool
+    filenames: list[str] | None = None
+    filenames_path: str | None = None
 
 
 def _as_long_tensor(value: Any, *, name: str, device: torch.device) -> torch.Tensor:
@@ -120,11 +122,41 @@ def _normalize_data_path(value: Any) -> str | list[str]:
     )
 
 
+def _normalize_motion_filenames(value: Any, *, name: str) -> list[str] | None:
+    if value is None:
+        return None
+    if isinstance(value, (str, bytes)):
+        raise TypeError(f"motion_cfgs[{name!r}] filenames must be a sequence of strings, not a string")
+    if not isinstance(value, Sequence):
+        raise TypeError(f"motion_cfgs[{name!r}] filenames must be a sequence of strings")
+    filenames = []
+    for item in value:
+        if not isinstance(item, (str, os.PathLike)):
+            raise TypeError(f"motion_cfgs[{name!r}] filenames entries must be strings")
+        filename = os.fspath(item).strip()
+        if filename:
+            filenames.append(filename)
+    if not filenames:
+        raise ValueError(f"motion_cfgs[{name!r}] filenames must not be empty")
+    return filenames
+
+
+def _normalize_optional_path(value: Any, *, name: str, key: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, (str, os.PathLike)):
+        raise TypeError(f"motion_cfgs[{name!r}] {key} must be a string path")
+    path = os.fspath(value).strip()
+    if not path:
+        raise ValueError(f"motion_cfgs[{name!r}] {key} must not be empty")
+    return path
+
+
 def normalize_motion_cfgs(motion_cfgs: Mapping[str, object]) -> list[MotionDatasetConfig]:
     if not isinstance(motion_cfgs, Mapping):
         raise TypeError(
             "motion_cfgs must be a mapping of dataset name to "
-            "{path, weight, full_motion}"
+            "{path, weight, full_motion, filenames, filenames_path}"
         )
 
     configs: list[MotionDatasetConfig] = []
@@ -136,10 +168,10 @@ def normalize_motion_cfgs(motion_cfgs: Mapping[str, object]) -> list[MotionDatas
         if not isinstance(raw_cfg, Mapping):
             raise TypeError(
                 f"motion_cfgs[{name!r}] must be a mapping with keys "
-                "{path, weight, full_motion}"
+                "{path, weight, full_motion, filenames, filenames_path}"
             )
 
-        allowed_keys = {"path", "weight", "full_motion"}
+        allowed_keys = {"path", "weight", "full_motion", "filenames", "filenames_path"}
         missing_keys = [key for key in ("path", "weight", "full_motion") if key not in raw_cfg]
         if missing_keys:
             raise ValueError(
@@ -169,12 +201,23 @@ def normalize_motion_cfgs(motion_cfgs: Mapping[str, object]) -> list[MotionDatas
                 f"motion_cfgs[{name!r}] full_motion must be a boolean, got {type(full_motion).__name__}"
             )
 
+        filenames = _normalize_motion_filenames(raw_cfg.get("filenames"), name=name)
+        filenames_path = _normalize_optional_path(
+            raw_cfg.get("filenames_path"),
+            name=name,
+            key="filenames_path",
+        )
+        if filenames is not None and filenames_path is not None:
+            raise ValueError(f"motion_cfgs[{name!r}] must provide only one of filenames or filenames_path")
+
         configs.append(
             MotionDatasetConfig(
                 name=name,
                 path=data_path,
                 weight=weight,
                 full_motion=full_motion,
+                filenames=filenames,
+                filenames_path=filenames_path,
             )
         )
 
@@ -198,6 +241,10 @@ def motion_cfgs_to_dict(
             "weight": float(cfg.weight),
             "full_motion": cfg.full_motion,
         }
+        if cfg.filenames is not None:
+            serialized[cfg.name]["filenames"] = list(cfg.filenames)
+        if cfg.filenames_path is not None:
+            serialized[cfg.name]["filenames_path"] = cfg.filenames_path
     return serialized
 
 
@@ -218,6 +265,8 @@ def load_motion_dataset_collection(
             target_fps=target_fps,
             num_envs=num_envs,
             full_motion=cfg.full_motion,
+            filenames=cfg.filenames,
+            filenames_path=cfg.filenames_path,
             body_names=body_names,
             joint_names=joint_names,
             windowed_next_window_device=windowed_next_window_device,
