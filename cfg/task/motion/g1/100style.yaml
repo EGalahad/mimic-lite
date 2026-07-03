@@ -2,6 +2,6 @@
 
 motion_cfgs:
   style100:
-    path: "../any4hdmi/output/100style"
+    path: "../any4hdmi/output/g1/100style"
     weight: 1.0
     full_motion: true

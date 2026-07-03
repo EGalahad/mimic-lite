@@ -3,7 +3,7 @@
 windowed_next_window_device: current
 windowed_pin_window_load: true
 motion_cfgs:
-  amass:
-    path: ../any4hdmi/output/g1/amass
+  ground_motion:
+    path: "../any4hdmi/output/g1/ground_motions"
     weight: 1.0
-    full_motion: false
+    full_motion: true

@@ -2,10 +2,11 @@
 
 motion_cfgs:
   lafan:
-    # path: ../any4hdmi/output/lafan/motions/fight1_subject5.npz
-    # path: ../any4hdmi/output/lafan/motions/jumps1_subject2.npz
-    # path: ../any4hdmi/output/lafan/motions/dance1_subject1.npz
-    # path: ../any4hdmi/output/lafan/motions/sprint1_subject4.npz
-    path: ../any4hdmi/output/lafan/motions/fallAndGetUp1_subject1.npz
+    path: ../any4hdmi/output/g1/lafan/motions/walk1_subject1.npz
+    # path: ../any4hdmi/output/g1/lafan/motions/fight1_subject5.npz
+    # path: ../any4hdmi/output/g1/lafan/motions/jumps1_subject2.npz
+    # path: ../any4hdmi/output/g1/lafan/motions/dance1_subject1.npz
+    # path: ../any4hdmi/output/g1/lafan/motions/sprint1_subject4.npz
+    # path: ../any4hdmi/output/g1/lafan/motions/fallAndGetUp1_subject1.npz
     weight: 1.0
     full_motion: true

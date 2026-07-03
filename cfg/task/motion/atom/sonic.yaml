@@ -1,0 +1,7 @@
+# @package task.command
+
+motion_cfgs:
+  sonic:
+    path: "../any4hdmi/output/atom/sonic"
+    weight: 1.0
+    full_motion: false

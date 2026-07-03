@@ -1,0 +1,51 @@
+# @package task.command
+
+windowed_next_window_device: current
+windowed_pin_window_load: true
+motion_cfgs:
+  # generic sum: 0.6
+  lafan:
+    path: "../any4hdmi/output/g1/lafan"
+    weight: 0.2
+    full_motion: true
+  style100:
+    path: "../any4hdmi/output/g1/100style"
+    weight: 0.1
+    full_motion: true
+  sonic:
+    path: "../any4hdmi/output/g1/sonic"
+    filenames_path: "../any4hdmi/output/g1/sonic/limmt/passed/filenames.txt"
+    weight: 0.3
+    full_motion: false
+
+  # balance sum: 0.05
+  sonic_strict_one_leg:
+    path: "../any4hdmi/output/g1/sonic-strict_one_leg"
+    weight: 0.05
+    full_motion: true
+
+  # ground sum: 0.1
+  ground_motion:
+    path: "../any4hdmi/output/g1/ground_motions"
+    weight: 0.1
+    full_motion: true
+  # sonic_low_posture_clean:
+  #   path: "../any4hdmi/output/g1/sonic-low_posture_clean"
+  #   weight: 0.05
+  #   full_motion: true
+
+  # dynamic sum: 0.15
+  amass_hard:
+    path: ../any4hdmi/output/g1/amass_hard
+    weight: 0.05
+    full_motion: true
+  extreme:
+    path: "../any4hdmi/output/g1/extreme_motions"
+    weight: 0.1
+    full_motion: true
+
+  # pico sum: 0.1
+  real_pico:
+    path: "../any4hdmi/real_pico"
+    weight: 0.1
+    full_motion: true

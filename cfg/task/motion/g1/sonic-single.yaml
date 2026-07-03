@@ -1,0 +1,10 @@
+# @package task.command
+
+motion_cfgs:
+  sonic:
+    # path: ../any4hdmi/output/g1/sonic/motions/230324/flip_360_hero_landing_001__A304.npz
+    # path: ../any4hdmi/output/g1/sonic/motions/230324/flip_180_R_009__A304_M.npz
+    # path: ../any4hdmi/output/g1/sonic/motions/230324/flip_090_001__A304.npz
+    path: ../any4hdmi/output/g1/ground_motions/motions/Take_034_Skeleton0.npz
+    weight: 1.0
+    full_motion: true

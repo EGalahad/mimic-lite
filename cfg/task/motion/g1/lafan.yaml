@@ -2,6 +2,6 @@
 
 motion_cfgs:
   lafan:
-    path: "../any4hdmi/output/lafan"
+    path: "../any4hdmi/output/g1/lafan"
     weight: 1.0
     full_motion: true
