@@ -33,7 +33,7 @@ from active_adaptation.utils.math import (
     batchify,
 )
 from active_adaptation.utils.profiling import ScopedTimer
-from tensordict import TensorDict
+from tensordict import TensorDict, TensorDictBase
 
 PROFILE_SYNC_TIMERS = os.environ.get("AA_PROFILE_SYNC_TIMERS", "0").lower() in {
     "1",
@@ -546,9 +546,28 @@ class RobotTracking(Command, namespace="mimic_lite"):
         self.viz = viz or VizCfg()
         self._ghost_model = None
 
-    def _sample_motions(self, env_ids: torch.Tensor) -> None:
+    def _sample_motions(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        terminated: torch.Tensor | None = None,
+        truncated: torch.Tensor | None = None,
+    ) -> None:
+        del truncated
         terminated_t = self.t[env_ids]
         rewind_mask = torch.rand(len(env_ids), device=self.dataset.device) < self.rewind_prob
+        if terminated is None:
+            terminated_mask = torch.zeros(
+                len(env_ids),
+                dtype=torch.bool,
+                device=self.dataset.device,
+            )
+        else:
+            terminated_mask = terminated.to(
+                device=self.dataset.device,
+                dtype=torch.bool,
+            ).reshape(-1)
+        rewind_mask &= terminated_mask
 
         # do not rewind when motion is about to finish
         finish_mask = terminated_t >= self.motion_len[env_ids] - 50
@@ -568,19 +587,32 @@ class RobotTracking(Command, namespace="mimic_lite"):
             rewind_steps=rewind_steps,
         )
         if self.start_from_zero or self.replay_motion:
-            sampled_motion.start_t.fill_(0)
+            sampled_motion.start_t.fill_(1)
         self.motion_ids[env_ids] = sampled_motion.motion_id
         self.motion_len[env_ids] = sampled_motion.motion_len
         self.t[env_ids] = sampled_motion.start_t
         self.first_sample_motion = False
 
-    def sample_init(self, env_ids: torch.Tensor) -> None:
+    def sample_init(
+        self,
+        env_ids: torch.Tensor,
+        reset_td: TensorDictBase | None = None,
+    ) -> None:
         if self._profile_resets:
             self._record_reset_profile(env_ids)
-        self._sample_motions(env_ids)
+        terminated = None
+        truncated = None
+        if reset_td is not None:
+            terminated = reset_td.get("terminated", None)
+            truncated = reset_td.get("truncated", None)
+        self._sample_motions(
+            env_ids,
+            terminated=terminated,
+            truncated=truncated,
+        )
 
         # reset root state and joint position/velocity from motion
-        self._motion_reset: MotionData = self.dataset.get_slice(
+        motion_reset: MotionData = self.dataset.get_slice(
             self.motion_ids[env_ids],
             self.t[env_ids],
             self.future_one_step,
@@ -588,7 +620,7 @@ class RobotTracking(Command, namespace="mimic_lite"):
         ).to(self.device).squeeze(1)
         # shape: [len(env_ids), num_bodies/num_joints, 3/4/...]
 
-        motion = self._motion_reset
+        motion = motion_reset
         init_root_pos = motion.body_pos_w[:, self.root_body_idx_motion]
         init_root_quat = motion.body_quat_w[:, self.root_body_idx_motion]
         init_root_lin_vel = motion.body_lin_vel_w[:, self.root_body_idx_motion]
