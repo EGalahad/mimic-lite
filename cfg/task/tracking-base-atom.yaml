@@ -1,0 +1,337 @@
+# @package task
+defaults:
+  - command/future_steps: short
+  - observation/priv: root_body_actions
+  - observation/command: joint
+  - observation/command_short: joint
+  - termination: base
+  - motion: atom/sonic
+  - _self_
+
+name: Atom01TrackBase
+project: mimic_lite
+
+shared:
+  root_body_name: base_link
+  anchor_body_name: base_link
+  reward_root_body_name: torso_link
+  termination_root_body_name: base_link
+  obs_body_names:
+    - "base_link"
+    - "torso_link"
+    - ".*_knee_link"
+    - ".*_ankle_roll_link"
+    - ".*_toe_link"
+    - ".*_arm_yaw_link"
+    - ".*_elbow_yaw_link"
+
+  tracking_body_names:
+    - "base_link"
+    - "torso_link"
+    - ".*_thigh_yaw_link"
+    - ".*_thigh_pitch_link"
+    - ".*_knee_link"
+    - ".*_ankle_roll_link"
+    - ".*_toe_link"
+    - ".*_arm_yaw_link"
+    - ".*_elbow_yaw_link"
+  tracking_joint_names:
+    - "torso_joint"
+    - ".*_thigh_.*_joint"
+    - ".*_knee_joint"
+    - ".*_ankle_.*_joint"
+    - ".*_arm_.*_joint"
+    - ".*_elbow_.*_joint"
+  reward_joint_names:
+    - "torso_joint"
+    - ".*_thigh_.*_joint"
+    - ".*_knee_joint"
+    - ".*_ankle_.*_joint"
+    - ".*_arm_.*_joint"
+    - ".*_elbow_.*_joint"
+
+viewer:
+  resolution: [1280, 720]
+  lookat: [0.0, 0.0, 0.0]
+  eye: [4.0, 4.0, 4.0]
+
+terrain: plane
+enable_cameras: false
+
+num_envs: 8192
+max_episode_length: 1000
+
+sim:
+  step_dt: 0.02
+  isaac_physics_dt: 0.005
+
+robot:
+  name: atom01-capsule
+
+input:
+  action:
+    _target_: mimic_lite.JointPosition
+    action_scaling:
+      .*_elbow_.*: 1.0
+      .*_arm_.*: 1.0
+      .*_thigh_.*: 0.5
+      .*_knee.*: 0.5
+      .*torso.*: 0.5
+      .*_ankle_.*: 0.5
+    min_delay: 1
+    max_delay: 3
+    alpha_range: [0.8, 1.0]
+
+command:
+  _target_: mimic_lite.RobotTracking
+  motion_cfgs: ???
+  tracking_body_names: ${task.shared.tracking_body_names}
+  obs_body_names: ${task.shared.obs_body_names}
+  tracking_joint_names: ${task.shared.tracking_joint_names}
+  diff_future_steps: [0, 1]
+  root_body_name: ${task.shared.root_body_name}
+  anchor_body_name: ${task.shared.anchor_body_name}
+
+  # TODO: put this into randomization reset callbacks
+  pose_range:
+    x: [-0.05, 0.05]
+    y: [-0.05, 0.05]
+    z: [-0.01, 0.01]
+    roll: [-0.1, 0.1]
+    pitch: [-0.1, 0.1]
+    yaw: [-0.1, 0.1]
+  velocity_range:
+    x: [-0.2, 0.2]
+    y: [-0.2, 0.2]
+    z: [-0.2, 0.2]
+    roll: [-0.5, 0.5]
+    pitch: [-0.5, 0.5]
+    yaw: [-0.5, 0.5]
+
+  init_joint_pos_noise: 0.1
+  init_joint_vel_noise: 0.1
+
+  rewind_prob: 0.8
+  rewind_steps_range: [25, 125]
+
+observation:
+  policy:
+    root_ang_vel_history:
+      _target_: mimic_lite.root_ang_vel_history
+      history_steps: [0, 1, 2, 3, 4, 8, 16]
+      noise_std: 0.2
+    projected_gravity_history:
+      _target_: mimic_lite.projected_gravity_history
+      history_steps: [0, 1, 2, 3, 4, 8, 16]
+      noise_std: 0.01
+    joint_pos_history:
+      _target_: mimic_lite.joint_pos_history
+      history_steps: [0, 1, 2, 3, 4, 8, 16]
+      noise_std: 0.02
+    joint_vel_history:
+      _target_: mimic_lite.joint_vel_history
+      history_steps: [0, 1, 2, 3, 4, 8, 16]
+      noise_std: 0.5
+    prev_actions:
+      _target_: mimic_lite.prev_actions
+      steps: 3
+  ref_joint_pos_:
+    ref_joint_action:
+      _target_: mimic_lite.ref_joint_action
+  _motion_length:
+    motion_length:
+      _target_: mimic_lite.motion_length
+
+reward:
+  tracking:
+    root_pos:
+      _target_: mimic_lite.body_pos_exp
+      body_names: ["${task.shared.reward_root_body_name}"]
+      enabled: true
+      weight: 0.5
+      sigma: 0.3
+    root_ori:
+      _target_: mimic_lite.body_ori_exp
+      body_names: ["${task.shared.reward_root_body_name}"]
+      weight: 0.5
+      sigma: 0.4
+    root_linvel:
+      _target_: mimic_lite.body_lin_vel_exp
+      body_names: ["${task.shared.reward_root_body_name}"]
+      weight: 0.5
+      sigma: 1.0
+    root_angvel:
+      _target_: mimic_lite.body_ang_vel_exp
+      body_names: ["${task.shared.reward_root_body_name}"]
+      weight: 0.5
+      sigma: 2.5
+
+    body_pos:
+      _target_: mimic_lite.body_pos_local_exp
+      body_names: ${task.shared.tracking_body_names}
+      weight: 1.0
+      sigma: 0.3
+    body_ori:
+      _target_: mimic_lite.body_ori_local_exp
+      body_names: ${task.shared.tracking_body_names}
+      weight: 1.0
+      sigma: 0.4
+
+    body_linvel:
+      _target_: mimic_lite.body_lin_vel_exp
+      body_names: ${task.shared.tracking_body_names}
+      weight: 0.5
+      sigma: 1.0
+    body_angvel:
+      _target_: mimic_lite.body_ang_vel_exp
+      body_names: ${task.shared.tracking_body_names}
+      weight: 0.5
+      sigma: 2.5
+
+
+    joint_pos:
+      _target_: mimic_lite.joint_pos_tracking_product
+      joint_names: ${task.shared.reward_joint_names}
+      weight: 0.5
+      sigma: 0.25
+    joint_vel:
+      _target_: mimic_lite.joint_vel_tracking_product
+      joint_names: ${task.shared.reward_joint_names}
+      weight: 0.5
+      sigma: 2.5
+
+  loco:
+    action_rate_l2:     {weight: 0.1, enabled: true}
+    joint_vel_l2:       {weight: 1.0e-4, joint_names: .*}
+    power_safety_regularization:
+      _target_: mimic_lite.power_safety_regularization
+      weight: -10.0
+      joint_names: ".*_knee_joint"
+      deadband: 150.0
+      power_norm: 500.0
+      enabled: false
+    joint_pos_limits:
+      _target_: mimic_lite.joint_pos_limits
+      weight: 10.0
+      joint_names: ".*"
+      soft_factor: 0.9
+      enabled: true
+    self_collisions:
+      _target_: mimic_lite.self_collisions
+      weight: -1.0
+      enabled: true
+      sensor_name: self_collision
+      force_threshold: 1.0
+
+    feet_slip:
+      _target_: mimic_lite.feet_slip
+      weight: 0.5
+      tolerance: 0.0
+      enabled: false
+      body_names: .*ankle_roll_link
+
+    feet_air_time:
+      _target_: mimic_lite.feet_air_time
+      weight: 4.0
+      enabled: true
+      body_names: [left_ankle_roll_link, right_ankle_roll_link]
+      body2_names: [left_toe_link, right_toe_link]
+      thres: 0.8
+      # height_range: [0.035, 0.155]
+      height_range: [0.05, 0.15]
+      time_factor_range: [0.2, 1.0]
+
+    survival:           {weight: 4.0, enabled: true}
+  tracking_metrics:
+    _enabled_: false
+    root_pos:
+      _target_: mimic_lite.body_pos_error
+      body_names: ["${task.shared.reward_root_body_name}"]
+      weight: 1.0
+      enabled: false
+    root_ori:
+      _target_: mimic_lite.body_ori_error
+      body_names: ["${task.shared.reward_root_body_name}"]
+      weight: 1.0
+      enabled: false
+    body_pos:
+      _target_: mimic_lite.body_pos_error_local
+      body_names: ${task.shared.tracking_body_names}
+      weight: 1.0
+      enabled: false
+    body_ori:
+      _target_: mimic_lite.body_ori_error_local
+      body_names: ${task.shared.tracking_body_names}
+      weight: 1.0
+      enabled: false
+    joint_pos:
+      _target_: mimic_lite.joint_pos_error
+      joint_names: ${task.shared.reward_joint_names}
+      weight: 1.0
+      enabled: false
+  loco_metrics:
+    _enabled_: false
+    joint_pos_limits:
+      _target_: mimic_lite.joint_pos_limits
+      weight: 1.0
+      joint_names: ".*"
+      soft_factor: 0.9
+      enabled: false
+
+    feet_contact_count:
+      _target_: mimic_lite.feet_contact_count
+      weight: 1.0
+      enabled: false
+      body_names: .*ankle_roll_link
+
+    feet_contact_duration:
+      _target_: mimic_lite.feet_contact_duration
+      weight: 1.0
+      enabled: false
+      body_names: .*ankle_roll_link
+
+randomization:
+  # startup
+  perturb_body_materials:
+    body_names: [".*ankle_roll_link", ".*_elbow_yaw_link"]
+    static_friction_range: [0.3, 1.6]
+    dynamic_friction_range: [0.3, 1.2]
+    restitution_range: [0.0, 0.5]
+    solref_time_constant_range: [0.015, 0.03]
+    solref_dampratio_range: [0.5, 2.0]
+    homogeneous: true
+
+  perturb_body_mass:
+    base_link: [0.9, 1.1]
+    torso_link: [0.9, 1.1]
+  perturb_body_com:
+    "base_link|torso_link": [-0.03, 0.03]
+
+  motor_params_implicit:
+    stiffness_range:
+      ".*(arm|elbow).*": [0.9, 1.1]
+      ".*(torso|thigh|knee|ankle).*": [0.8, 1.2]
+    damping_range:
+      ".*(arm|elbow).*": [0.9, 1.1]
+      ".*(torso|thigh|knee|ankle).*": [0.8, 1.2]
+    armature_range:
+      .*: [0.75, 1.25]
+    friction_range:
+      .*: [0.05, 0.25]
+
+
+  # reset
+  random_joint_offset:
+    .*: [-0.01, 0.01]
+
+  # interval
+  perturb_root_vel:
+    min_s: 4.0
+    max_s: 6.0
+
+    x: [-0.2, 0.2]
+    y: [-0.2, 0.2]
+    z: [-0.1, 0.1]
+    roll: [-0.2, 0.2]
+    pitch: [-0.2, 0.2]
+    yaw: [-0.4, 0.4]
