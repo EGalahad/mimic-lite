@@ -5,6 +5,7 @@ defaults:
   - observation/command: joint
   - observation/command_short: joint
   - termination: base
+  - motion: g1/lafan
   - _self_
 
 name: G1TrackBase

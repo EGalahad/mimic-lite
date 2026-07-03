@@ -39,7 +39,7 @@ wandb:
   tags: []
 
 defaults:
-  - task: lafan_100style_real
+  - task: tracking-base
   - algo: ppo_roa_train
   - stages: normal
   - _self_

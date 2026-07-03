@@ -1,0 +1,23 @@
+# @package task.command
+
+motion_cfgs:
+  macarena_001__A545:
+    path: ../any4hdmi/output/sonic/motions/240529/macarena_001__A545.npz
+    weight: 1.0
+    full_motion: true
+  forward_lunge_R_002__A359:
+    path: ../any4hdmi/output/sonic/motions/230509/forward_lunge_R_002__A359.npz
+    weight: 1.0
+    full_motion: true
+  squat_001__A359:
+    path: ../any4hdmi/output/sonic/motions/230509/squat_001__A359.npz
+    weight: 1.0
+    full_motion: true
+  walk_backward_start_001__A021:
+    path: ../any4hdmi/output/sonic/motions/220713/walk_backward_start_001__A021.npz
+    weight: 1.0
+    full_motion: true
+  one_leg_idle_R_002__A533:
+    path: ../any4hdmi/output/sonic/motions/240327/one_leg_idle_R_002__A533.npz
+    weight: 1.0
+    full_motion: true

@@ -1,0 +1,7 @@
+# @package task.command
+
+motion_cfgs:
+  lafan:
+    path: "../lafan-process/output_motion/"
+    weight: 1.0
+    full_motion: true

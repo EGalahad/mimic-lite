@@ -1,0 +1,25 @@
+# @package task.command
+
+windowed_next_window_device: current
+windowed_pin_window_load: true
+motion_cfgs:
+  lafan:
+    path: "../any4hdmi/output/lafan"
+    weight: 0.3
+    full_motion: true
+  style100:
+    path: "../any4hdmi/output/100style"
+    weight: 0.2
+    full_motion: true
+  amass:
+    path: ../any4hdmi/output/limmt_amass/subsets/amass_limmt_gqs_16
+    weight: 0.3
+    full_motion: false
+  amass_hard:
+    path: ../any4hdmi/output/amass_hard
+    weight: 0.1
+    full_motion: true
+  real_pico:
+    path: "../any4hdmi/real_pico"
+    weight: 0.1
+    full_motion: true

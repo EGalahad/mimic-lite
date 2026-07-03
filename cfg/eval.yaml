@@ -21,7 +21,7 @@ eval_output: eval_rollout.pt
 eval_summary_output: eval_summary.json
 
 defaults:
-  - task: lafan_100style_real
+  - task: tracking-base
   - algo: mimic_lite_ppo
   - override /task/command/future_steps: short
   - _self_

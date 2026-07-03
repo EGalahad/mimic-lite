@@ -39,6 +39,6 @@ wandb:
   tags: []
 
 defaults:
-  - task: lafan_100style_real
+  - task: tracking-base
   - algo: mimic_lite_ppo
   - _self_

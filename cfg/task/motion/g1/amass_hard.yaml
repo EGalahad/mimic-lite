@@ -1,0 +1,9 @@
+# @package task.command
+
+windowed_next_window_device: current
+windowed_pin_window_load: true
+motion_cfgs:
+  amass:
+    path: ../any4hdmi/output/amass_hard
+    weight: 1.0
+    full_motion: true

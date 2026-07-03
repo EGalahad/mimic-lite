@@ -1,0 +1,7 @@
+# @package task.command
+
+motion_cfgs:
+  real_pico:
+    path: "../any4hdmi/real_pico"
+    weight: 1.0
+    full_motion: true

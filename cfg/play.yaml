@@ -21,7 +21,7 @@ camera_follow: true
 
 
 defaults:
-  - task: lafan_100style_real
+  - task: tracking-base
   - algo: mimic_lite_ppo
   - override /task/command/future_steps: short
   - _self_
