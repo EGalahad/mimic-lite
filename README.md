@@ -70,8 +70,15 @@ Run single-stage PPO:
 
 ```bash
 bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=tracking_base task/motion=g1/mixture +exp=ppo/train backend=mjlab
+  task=tracking-base task/motion=g1/mixture +exp=ppo/train backend=mjlab
 ```
+
+Each `motion_cfgs` entry controls partitioning and runtime storage independently:
+
+- `shard: true` gives each distributed rank a disjoint, motion-aligned subset; it defaults to `false`.
+- `full_motion: true` keeps the visible dataset resident in GPU memory, while `false` uses persistent window pools with asynchronous prefetching.
+
+The default G1 mixture enables sharding only for the full SONIC dataset.
 
 Play a PPO checkpoint:
 

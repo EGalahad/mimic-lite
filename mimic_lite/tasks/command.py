@@ -382,12 +382,6 @@ class RobotTracking(Command, namespace="mimic_lite"):
             self.asset, tracking_joint_names
         )
 
-        env_next_window_device = os.environ.get("ANY4HDMI_NEXT_WINDOW_DEVICE")
-        if env_next_window_device:
-            windowed_next_window_device = env_next_window_device
-        if os.environ.get("ANY4HDMI_PIN_WINDOW_LOAD", "0") == "1":
-            windowed_pin_window_load = True
-
         motion_body_names = list(dict.fromkeys([
             *self.tracking_body_names,
             root_body_name,
@@ -616,7 +610,6 @@ class RobotTracking(Command, namespace="mimic_lite"):
             self.motion_ids[env_ids],
             self.t[env_ids],
             self.future_one_step,
-            profile_name="motion_reset",
         ).to(self.device).squeeze(1)
         # shape: [len(env_ids), num_bodies/num_joints, 3/4/...]
 
@@ -841,7 +834,6 @@ class RobotTracking(Command, namespace="mimic_lite"):
             self.motion_ids,
             self.t,
             steps=self.future_steps,
-            profile_name="future_ref_motion",
         )
         env_origins = self.env.scene.env_origins
 

@@ -29,6 +29,7 @@ def create_dataset_from_path(
     target_fps: int = 50,
     num_envs: int = 1,
     full_motion: bool = True,
+    shard: bool = False,
     filenames: list[str] | None = None,
     filenames_path: str | None = None,
     body_names: list[str] | None = None,
@@ -39,12 +40,20 @@ def create_dataset_from_path(
     import active_adaptation
 
     base_dir = Path(active_adaptation.__file__).parent.parent
+    try:
+        rank = int(os.environ.get("RANK", "0"))
+        world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    except ValueError as error:
+        raise ValueError("RANK and WORLD_SIZE must be integers") from error
     dataset = load_any4hdmi_dataset(
         root_path=root_path,
         target_fps=target_fps,
         base_dir=base_dir,
         num_envs=num_envs,
         full_motion=full_motion,
+        shard=shard,
+        rank=rank,
+        world_size=world_size,
         filenames=filenames,
         filenames_path=filenames_path,
         body_names=body_names,

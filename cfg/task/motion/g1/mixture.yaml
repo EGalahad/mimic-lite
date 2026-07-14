@@ -1,0 +1,62 @@
+# @package task.command
+
+windowed_next_window_device: current
+windowed_pin_window_load: true
+motion_cfgs:
+  # generic sum: 0.55
+  lafan:
+    path: "hf://elijahgalahad/any4hdmi-g1-lafan"
+    weight: 0.2
+    full_motion: true
+  style100:
+    path: "hf://elijahgalahad/any4hdmi-g1-100style"
+    weight: 0.1
+    full_motion: true
+  sonic:
+    path: "../any4hdmi/output/g1/sonic"
+    filenames_path: limmt/passed/filenames.txt
+    weight: 0.25
+    full_motion: false
+    shard: true
+
+  # ground sum: 0.05
+  ground_motion:
+    path: "hf://elijahgalahad/any4hdmi-g1-ground-motions"
+    weight: 0.05
+    full_motion: true
+  # sonic_low_posture_clean:
+  #   path: "../any4hdmi/output/g1/sonic-low_posture_clean"
+  #   weight: 0.05
+  #   full_motion: true
+
+  # dynamic sum: 0.3
+  amass_hard:
+    path: "../any4hdmi/output/g1/amass_hard"
+    filenames_path: views/train_dynamic.txt
+    weight: 0.05
+    full_motion: true
+  extreme:
+    path: "../any4hdmi/output/g1/extreme_motions"
+    weight: 0.05
+    full_motion: true
+  extreme_demo:
+    path: "../any4hdmi/output/g1/extreme-demo"
+    weight: 0.1
+    full_motion: true
+  high_dynamic_sequences:
+    path: "../any4hdmi/output/g1/high_dynamic_sequences"
+    weight: 0.1
+    full_motion: true
+
+  # balance sum: 0.05
+  sonic_strict_one_leg:
+    path: "../any4hdmi/output/g1/sonic"
+    filenames_path: views/strict_one_leg.txt
+    weight: 0.05
+    full_motion: true
+
+  # pico sum: 0.05
+  real_pico:
+    path: "hf://elijahgalahad/any4hdmi-g1-real-pico"
+    weight: 0.05
+    full_motion: true
