@@ -56,40 +56,17 @@ Run single-stage PPO:
 
 ```bash
 bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=lafan_sonic_100style_real +exp=ppo/train algo/ppo/module=residual backend=mjlab
+  task=tracking_base task/motion=g1/mixture +exp=ppo/train backend=mjlab
 ```
 
-Run SAC:
-
-```bash
-bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=lafan_sonic_100style_real +exp=sac/train backend=mjlab
-```
-
-Run sequential PPO:
-
-```bash
-uv --project venv/mjlab run projects/mimic-lite/scripts/train_sequential.py \
-  nproc_per_node=8 task=lafan_100style_real stages=normal backend=mjlab
-```
-
-To play checkpoints:
+Play a PPO checkpoint:
 
 ```bash
 uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
-  task=lafan +exp=ppo/train backend=mjlab \
-  checkpoint_path=run:elijahgalahad/hdmi/runs/kr0vxm4n \
-  task.num_envs=4 task.termination.root_pos_error.enabled=false
-
-uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
-  task=lafan +exp=sac/train backend=mjlab \
-  checkpoint_path=run:elijahgalahad/hdmi/runs/5jzn40za \
-  task.num_envs=4 task.termination.root_pos_error.enabled=false
-
-uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
-  task=lafan +exp=ppo_roa/finetune backend=mjlab \
-  checkpoint_path=run:elijahgalahad/hdmi/runs/a03f770b_lafan_100style_finetune \
-  task.num_envs=4 task.termination.root_pos_error.enabled=false
+  task=tracking-base task/motion=g1/lafan \
+  +exp=ppo/train algo/ppo/module=huge \
+  task.num_envs=4 task.termination.root_pos_error.enabled=false \
+  checkpoint_path=run:elijahgalahad/mimic_lite/xua2csee
 ```
 
 ## Troubleshooting
