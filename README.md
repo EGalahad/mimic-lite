@@ -110,3 +110,17 @@ If mjlab training fails with an error like `mujoco.mjtEnableBit.mjENBL_MULTICCD`
 uv --project venv/mjlab add 'mujoco<3.8'
 uv --project venv/mjlab sync
 ```
+
+## Citation
+
+If you find MimicLite useful in your research, please cite:
+
+```bibtex
+@misc{mimiclite2026,
+  author       = {{RoboParty Lab Team}},
+  title        = {MimicLite: Efficient and Effective General Humanoid Motion Tracking},
+  year         = {2026},
+  howpublished = {\url{https://github.com/EGalahad/mimic-lite}},
+  note         = {Technical report: \url{https://github.com/Roboparty/MimicLite/blob/main/mimic-lite.pdf}}
+}
+```
