@@ -31,20 +31,20 @@ motion_cfgs:
 
   # dynamic sum: 0.3
   amass_hard:
-    path: "../any4hdmi/output/g1/amass_hard"
+    path: "hf://elijahgalahad/any4hdmi-g1-amass-hard"
     filenames_path: views/train_dynamic.txt
     weight: 0.05
     full_motion: true
   extreme:
-    path: "../any4hdmi/output/g1/extreme_motions"
+    path: "hf://elijahgalahad/any4hdmi-g1-extreme-motions"
     weight: 0.05
     full_motion: true
   extreme_demo:
-    path: "../any4hdmi/output/g1/extreme-demo"
+    path: "hf://elijahgalahad/any4hdmi-g1-extreme-demo"
     weight: 0.1
     full_motion: true
   high_dynamic_sequences:
-    path: "../any4hdmi/output/g1/high_dynamic_sequences"
+    path: "hf://elijahgalahad/any4hdmi-g1-high-dynamic-sequences"
     weight: 0.1
     full_motion: true
 
