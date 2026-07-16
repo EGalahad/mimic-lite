@@ -470,7 +470,7 @@ class RobotTracking(Command, namespace="mimic_lite"):
         with torch.device(self.device):
             self.is_standing_env = torch.zeros(self.num_envs, 1, dtype=bool)
 
-        with torch.device(self.dataset.device):
+        with torch.device(self.device):
             self.motion_ids = torch.zeros(self.num_envs, dtype=torch.long)
             self.motion_len = torch.zeros(self.num_envs, dtype=torch.long)
             self.t = torch.zeros(self.num_envs, dtype=torch.long)
@@ -549,16 +549,16 @@ class RobotTracking(Command, namespace="mimic_lite"):
     ) -> None:
         del truncated
         terminated_t = self.t[env_ids]
-        rewind_mask = torch.rand(len(env_ids), device=self.dataset.device) < self.rewind_prob
+        rewind_mask = torch.rand(len(env_ids), device=self.device) < self.rewind_prob
         if terminated is None:
             terminated_mask = torch.zeros(
                 len(env_ids),
                 dtype=torch.bool,
-                device=self.dataset.device,
+                device=self.device,
             )
         else:
             terminated_mask = terminated.to(
-                device=self.dataset.device,
+                device=self.device,
                 dtype=torch.bool,
             ).reshape(-1)
         rewind_mask &= terminated_mask
@@ -572,7 +572,7 @@ class RobotTracking(Command, namespace="mimic_lite"):
         rewind_steps = torch.randint(
             *self.rewind_steps_range,
             (len(env_ids),),
-            device=self.dataset.device,
+            device=self.device,
         )
         sampled_motion = self.dataset.sample_motion(
             env_ids,
@@ -692,7 +692,7 @@ class RobotTracking(Command, namespace="mimic_lite"):
         reset_count = int(len(env_ids))
         if reset_count == 0:
             return
-        reset_t = self.t[env_ids.to(self.dataset.device)]
+        reset_t = self.t[env_ids.to(self.device)]
         total_reset_t = int(reset_t.sum().item())
         max_reset_t = int(reset_t.max().item())
         stats = self._reset_profile_stats
@@ -830,11 +830,12 @@ class RobotTracking(Command, namespace="mimic_lite"):
     def _refresh_future_buffers(self):
         # `self.t` anchors the future-motion buffer used by observations.
         self.obs_motion_t = self.t.clone()
-        self.future_ref_motion = self.dataset.get_slice(
-            self.motion_ids,
-            self.t,
-            steps=self.future_steps,
-        )
+        with ScopedTimer("command_step.get_slice", sync=PROFILE_SYNC_TIMERS):
+            self.future_ref_motion = self.dataset.get_slice(
+                self.motion_ids,
+                self.t,
+                steps=self.future_steps,
+            )
         env_origins = self.env.scene.env_origins
 
         self.ref_body_pos_future_w = (

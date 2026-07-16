@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Mapping, Tuple, Union
 import os
@@ -140,6 +141,8 @@ class PPOConfig:
     desired_kl: float | None = 0.01
     opt: str = "muon"
     compile: bool = False
+    compile_rollout: bool = True
+    compile_train_modules: bool = True
 
     entropy_coef_start: float = 0.004
     entropy_coef_end: float = 0.004
@@ -165,10 +168,14 @@ class PPOConfig:
     vecnorm: bool = True
     freeze_vecnorm: bool = False
 
-    grad_sync_mode: str | None = "manual"
+    grad_sync_mode: str | None = "ddp"
+    ddp_bucket_cap_mb: float = 4.0
+    ddp_gradient_as_bucket_view: bool = True
     manual_construct_dist_now: bool = True
     value_chunk_size: int | None = 65536
     rollout_amp_dtype: str | None = None
+    train_amp_dtype: str | None = "bf16"
+    grad_accum_steps: int = 1
     
     def __post_init__(self):
         if isinstance(self.opt, str):
@@ -189,6 +196,17 @@ class PPOConfig:
                 "grad_sync_mode must be one of {'ddp', 'manual', None}, "
                 f"got {self.grad_sync_mode!r}"
             )
+        if self.grad_sync_mode == "ddp" and not self.manual_construct_dist_now:
+            raise ValueError(
+                "grad_sync_mode='ddp' requires manual_construct_dist_now=True "
+                "so PPO actor training enters the DDP forward path"
+            )
+
+        self.ddp_bucket_cap_mb = float(self.ddp_bucket_cap_mb)
+        if self.ddp_bucket_cap_mb <= 0:
+            raise ValueError(
+                f"ddp_bucket_cap_mb must be positive, got {self.ddp_bucket_cap_mb}"
+            )
 
         if not self.actor_hidden_dims:
             raise ValueError(
@@ -199,6 +217,8 @@ class PPOConfig:
             self.value_chunk_size = int(self.value_chunk_size)
             if self.value_chunk_size <= 0:
                 self.value_chunk_size = None
+
+        self.grad_accum_steps = max(1, int(self.grad_accum_steps))
 
         if isinstance(self.rollout_amp_dtype, str):
             self.rollout_amp_dtype = self.rollout_amp_dtype.lower()
@@ -216,6 +236,24 @@ class PPOConfig:
                 "rollout_amp_dtype must be one of {'bf16', 'bfloat16', "
                 "'fp16', 'float16', None}, "
                 f"got {self.rollout_amp_dtype!r}"
+            )
+
+        if isinstance(self.train_amp_dtype, str):
+            self.train_amp_dtype = self.train_amp_dtype.lower()
+            if self.train_amp_dtype in {"none", "null", "false", "0"}:
+                self.train_amp_dtype = None
+
+        if self.train_amp_dtype not in {
+            "bf16",
+            "bfloat16",
+            "fp16",
+            "float16",
+            None,
+        }:
+            raise ValueError(
+                "train_amp_dtype must be one of {'bf16', 'bfloat16', "
+                "'fp16', 'float16', None}, "
+                f"got {self.train_amp_dtype!r}"
             )
 
 
@@ -258,6 +296,13 @@ class PPOPolicy(PPOBase):
         self.joint_names = env.action_manager.joint_names
 
         self._build_vecnorm_modules(observation_spec)
+        self._train_amp_dtype = None
+        if self.cfg.train_amp_dtype is not None:
+            self._train_amp_dtype = (
+                torch.bfloat16
+                if self.cfg.train_amp_dtype in {"bf16", "bfloat16"}
+                else torch.float16
+            )
 
         observation_keys = set(observation_spec.keys(True, True))
         missing_keys = sorted(
@@ -298,6 +343,13 @@ class PPOPolicy(PPOBase):
                 nn.init.constant_(module.bias, 0.0)
 
         self.apply(init_)
+
+        if self.cfg.compile_train_modules:
+            # Follow PyTorch's supported compile/DDP ordering by compiling the
+            # inner modules before DDP wraps them. Module.compile() preserves
+            # parameter identity for the subsequent DDP and optimizer setup.
+            self.actor.compile()
+            self.critic.compile()
 
         if aa.is_distributed():
             self.world_size = aa.get_world_size()
@@ -421,23 +473,25 @@ class PPOPolicy(PPOBase):
     @VecNorm.freeze()
     def compute_value(self, tensordict):
         self.vecnorm(tensordict)
-        return self.critic(tensordict)
+        critic = self._unwrap_ddp(self.critic)
+        return critic(tensordict)
 
     @torch.no_grad()
     def _critic_values_chunked(self, tensordict: TensorDict) -> torch.Tensor:
+        critic = self._unwrap_ddp(self.critic)
         tensordict_flat = tensordict.view(-1)
         numel = tensordict_flat.numel()
         chunk_size = self.cfg.value_chunk_size
 
         if chunk_size is None or numel <= chunk_size:
-            values = self.critic(tensordict_flat)["state_value"]
+            values = critic(tensordict_flat)["state_value"]
             return values.view(*tensordict.batch_size, *values.shape[1:])
 
         values_flat = None
         for start in range(0, numel, chunk_size):
             end = min(start + chunk_size, numel)
             chunk = tensordict_flat[start:end]
-            chunk_values = self.critic(chunk)["state_value"]
+            chunk_values = critic(chunk)["state_value"]
             if values_flat is None:
                 values_flat = chunk_values.new_empty(
                     (numel, *chunk_values.shape[1:])
@@ -468,8 +522,10 @@ class PPOPolicy(PPOBase):
         ddp_kwargs = dict(
             device_ids=[local_rank],
             output_device=local_rank,
-            broadcast_buffers=True,
+            broadcast_buffers=False,
             find_unused_parameters=False,
+            bucket_cap_mb=self.cfg.ddp_bucket_cap_mb,
+            gradient_as_bucket_view=self.cfg.ddp_gradient_as_bucket_view,
         )
 
         class DDPWithAttr(DDP):
@@ -487,6 +543,10 @@ class PPOPolicy(PPOBase):
         self.actor = wrap_td_module(self.actor)
         self.critic = wrap_td_module(self.critic)
 
+    @staticmethod
+    def _unwrap_ddp(module: nn.Module) -> nn.Module:
+        return module.module if isinstance(module, DDP) else module
+
     @torch.no_grad()
     def _broadcast_parameters(self):
         for module in (self.actor, self.critic):
@@ -501,6 +561,22 @@ class PPOPolicy(PPOBase):
                     continue
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.AVG)
 
+    @staticmethod
+    def _ddp_sync_context(module: nn.Module, *, synchronize: bool):
+        if isinstance(module, DDP) and not synchronize:
+            return module.no_sync()
+        return nullcontext()
+
+    def _actor_training_dist(self, tensordict: TensorDict) -> D.Independent:
+        if isinstance(self.actor, DDP) or self.cfg.manual_construct_dist_now:
+            # DDP training must enter the wrapper's forward so its reducer can
+            # prepare gradient buckets and overlap reduction with backward.
+            self.actor(tensordict)
+            return self.dist_cls(
+                loc=tensordict["loc"], scale=tensordict["scale"]
+            )
+        return self.actor.get_dist(tensordict)
+
     def get_next_saved_keys(self):
         return ()
 
@@ -511,19 +587,19 @@ class PPOPolicy(PPOBase):
         return int(getattr(self.env, "current_iter", 0))
 
     def get_rollout_policy(self, mode: str = "train", critic: bool = False):
+        actor_module = self._unwrap_ddp(self.actor)
         if mode == "deploy":
-            in_keys = set(self.actor.in_keys)
+            in_keys = set(actor_module.in_keys)
             in_keys = [key for key in in_keys if key in self.vecnorms]
             vecnorm = Seq(
                 *(Mod(self.vecnorms[key], [key], [key]) for key in in_keys)
             ).to(self.device)
             ood_detector = ObsOODDetector(list(in_keys), sigma=5.0)
-            modules = [vecnorm, ood_detector, self.actor]
-            modules[-1] = modules[-1].module[0]
+            modules = [vecnorm, ood_detector, actor_module.module[0]]
             modules.append(MeanAction())
             out_keys = [ACTION_KEY]
         else:
-            actor = self.actor
+            actor = actor_module
             if self.cfg.rollout_amp_dtype is not None:
                 dtype = (
                     torch.bfloat16
@@ -531,7 +607,7 @@ class PPOPolicy(PPOBase):
                     else torch.float16
                 )
                 actor = RolloutActorAutocast(
-                    self.actor,
+                    actor_module,
                     dist_cls=self.dist_cls,
                     dist_keys=tuple(self.dist_keys),
                     dtype=dtype,
@@ -542,14 +618,20 @@ class PPOPolicy(PPOBase):
         rollout_policy = Seq(*modules, selected_out_keys=out_keys)
         if self.cfg.freeze_vecnorm:
             rollout_policy.forward = VecNorm.freeze()(rollout_policy.forward)
-        if self.cfg.compile and not aa.is_distributed() and mode != "deploy":
-            rollout_policy = torch.compile(rollout_policy)
+        if (self.cfg.compile or self.cfg.compile_rollout) and mode != "deploy":
+            # Rollout inference is rank-local even when PPO training uses DDP.
+            # Avoid CUDA graphs because the rollout TensorDict is mutated and
+            # reused across environment steps; Inductor fusion is sufficient.
+            rollout_policy = torch.compile(
+                rollout_policy,
+                mode="max-autotune-no-cudagraphs",
+            )
         return rollout_policy
 
     @VecNorm.freeze()
     def train_op(self, tensordict: TensorDict):
         with ScopedTimer("training.exclude_stats", sync=False):
-            tensordict = tensordict.exclude("stats")
+            tensordict = tensordict.exclude("stats", ("next", "stats"))
 
         with ScopedTimer("training.policy", sync=False):
             info = self.train_policy(tensordict.copy())
@@ -759,27 +841,38 @@ class PPOPolicy(PPOBase):
         tensordict["adv_before_norm"] = adv
         return tensordict
 
+    def _train_autocast(self):
+        if self._train_amp_dtype is None:
+            return nullcontext()
+        return torch.autocast(
+            device_type=torch.device(self.device).type,
+            dtype=self._train_amp_dtype,
+            enabled=torch.device(self.device).type == "cuda",
+        )
+
     def _update_ppo(self, tensordict: TensorDict):
+        if self.cfg.grad_accum_steps > 1:
+            return self._update_ppo_grad_accum(
+                tensordict,
+                self.cfg.grad_accum_steps,
+            )
+        return self._update_ppo_full(tensordict)
+
+    def _update_ppo_full(self, tensordict: TensorDict):
         dist_kwargs_old = tensordict.select(*self.dist_keys)
 
         [tensordict.pop(key) for key in self.dist_keys]
         action_old = tensordict.pop(ACTION_KEY)
         logp_old = tensordict.pop(f"{ACTION_KEY}_log_prob")
         with ScopedTimer("training.policy.ppo.actor_dist", sync=PROFILE_SYNC_TIMERS):
-            if self.cfg.manual_construct_dist_now:
-                actor_base = (
-                    self.actor.module if isinstance(self.actor, DDP) else self.actor
-                )
-                actor_base(tensordict)
-                dist_now = self.dist_cls(
-                    loc=tensordict["loc"], scale=tensordict["scale"]
-                )
-            else:
-                dist_now: D.Independent = self.actor.get_dist(tensordict)
+            with self._train_autocast():
+                dist_now = self._actor_training_dist(tensordict)
 
-            with set_composite_lp_aggregate(True):
-                log_probs = dist_now.log_prob(action_old)
-            entropy = dist_now.entropy().mean()
+                with set_composite_lp_aggregate(True):
+                    log_probs = dist_now.log_prob(action_old)
+                entropy = dist_now.entropy().mean()
+            log_probs = log_probs.float()
+            entropy = entropy.float()
 
         valid = ~tensordict["is_init"].squeeze(-1)
 
@@ -794,7 +887,9 @@ class PPOPolicy(PPOBase):
 
         with ScopedTimer("training.policy.ppo.critic", sync=PROFILE_SYNC_TIMERS):
             b_returns = tensordict["ret"]
-            values = self.critic(tensordict)["state_value"]
+            with self._train_autocast():
+                values = self.critic(tensordict)["state_value"]
+            values = values.float()
             value_loss = F.mse_loss(b_returns, values, reduction="none")
             value_loss = value_loss[valid].mean(dim=0)
 
@@ -834,6 +929,182 @@ class PPOPolicy(PPOBase):
             "actor/clamp_ratio": clipfrac.detach(),
             "actor/entropy": entropy.detach(),
             "actor/mean_std": tensordict["scale"].detach().mean(),
+            "actor/kl": kl.detach(),
+            "opt/grad_norm.actor": actor_grad_norm.detach(),
+            "opt/grad_norm.critic": critic_grad_norm.detach(),
+        }
+
+        for i, group_name in enumerate(self.reward_groups):
+            info[f"critic/{group_name}.explained_var"] = explained_var[i]
+            info[f"critic/{group_name}.value_loss"] = value_loss[i].detach()
+
+        return info
+
+    def _update_ppo_grad_accum(
+        self,
+        tensordict: TensorDict,
+        grad_accum_steps: int,
+    ):
+        numel = tensordict.numel()
+        microbatch_size = (numel + grad_accum_steps - 1) // grad_accum_steps
+        valid_all = ~tensordict["is_init"].squeeze(-1)
+        valid_count = valid_all.sum()
+        sample_count = torch.as_tensor(numel, device=self.device, dtype=torch.float32)
+        reward_dim = tensordict["ret"].shape[-1]
+
+        policy_loss_sum = torch.zeros((), device=self.device)
+        entropy_sum = torch.zeros((), device=self.device)
+        value_loss_sum = torch.zeros(reward_dim, device=self.device)
+        clip_sum = torch.zeros((), device=self.device)
+        kl_sum = torch.zeros((), device=self.device)
+        scale_sum = torch.zeros((), device=self.device)
+        scale_count = torch.zeros((), device=self.device)
+
+        self.opt_policy.zero_grad()
+        self.opt_critic.zero_grad()
+
+        for start in range(0, numel, microbatch_size):
+            end = min(start + microbatch_size, numel)
+            synchronize = end == numel
+            micro_td = tensordict[start:end]
+            action_old = micro_td[ACTION_KEY]
+            logp_old = micro_td[f"{ACTION_KEY}_log_prob"]
+            valid = ~micro_td["is_init"].squeeze(-1)
+
+            actor_td = micro_td.exclude(
+                ACTION_KEY,
+                f"{ACTION_KEY}_log_prob",
+                *self.dist_keys,
+            )
+            dist_kwargs_old = micro_td.select(*self.dist_keys)
+
+            with self._ddp_sync_context(self.actor, synchronize=synchronize):
+                with ScopedTimer(
+                    "training.policy.ppo.actor_dist", sync=PROFILE_SYNC_TIMERS
+                ):
+                    with self._train_autocast():
+                        dist_now = self._actor_training_dist(actor_td)
+
+                        with set_composite_lp_aggregate(True):
+                            log_probs = dist_now.log_prob(action_old)
+                        entropy_values = dist_now.entropy()
+
+                    log_probs = log_probs.float()
+                    entropy_values = entropy_values.float()
+
+                with ScopedTimer(
+                    "training.policy.ppo.policy_loss", sync=PROFILE_SYNC_TIMERS
+                ):
+                    adv = micro_td["adv"]
+                    log_ratio = (log_probs - logp_old).unsqueeze(-1)
+                    ratio = torch.exp(log_ratio)
+                    surr1 = adv * ratio
+                    surr2 = adv * ratio.clamp(1.0 - self.clip_param, 1.0 + self.clip_param)
+                    policy_loss_part = -torch.min(surr1, surr2)[valid].sum() / valid_count
+                    entropy_loss_part = (
+                        -self.entropy_coef * entropy_values.sum() / sample_count
+                    )
+                    actor_loss = policy_loss_part + entropy_loss_part
+
+                actor_loss.backward()
+
+            with torch.no_grad():
+                policy_loss_sum += (-torch.min(surr1, surr2)[valid]).sum().detach()
+                entropy_sum += entropy_values.sum().detach()
+                clip_sum += ((ratio - 1.0).abs() > self.clip_param).float().sum()
+                dist_old = self.dist_cls(**dist_kwargs_old)
+                kl_sum += D.kl_divergence(dist_old, dist_now).sum().detach()
+                scale = actor_td["scale"].detach()
+                scale_sum += scale.sum()
+                scale_count += scale.numel()
+
+            del (
+                actor_loss,
+                actor_td,
+                dist_now,
+                dist_old,
+                dist_kwargs_old,
+                entropy_loss_part,
+                entropy_values,
+                log_probs,
+                log_ratio,
+                policy_loss_part,
+                ratio,
+                surr1,
+                surr2,
+                scale,
+            )
+
+            critic_td = micro_td.exclude(
+                ACTION_KEY,
+                f"{ACTION_KEY}_log_prob",
+                *self.dist_keys,
+            )
+            with self._ddp_sync_context(self.critic, synchronize=synchronize):
+                with ScopedTimer("training.policy.ppo.critic", sync=PROFILE_SYNC_TIMERS):
+                    b_returns = micro_td["ret"]
+                    with self._train_autocast():
+                        values = self.critic(critic_td)["state_value"]
+                    values = values.float()
+                    value_loss = F.mse_loss(b_returns, values, reduction="none")
+                    value_loss_part = (
+                        value_loss[valid].sum()
+                        / valid_count
+                        / value_loss.shape[-1]
+                    )
+
+                value_loss_part.backward()
+
+            with torch.no_grad():
+                value_loss_sum += value_loss[valid].sum(dim=0).detach()
+
+            del (
+                action_old,
+                b_returns,
+                critic_td,
+                logp_old,
+                micro_td,
+                valid,
+                value_loss,
+                value_loss_part,
+                values,
+            )
+
+        if aa.is_distributed() and self.cfg.grad_sync_mode == "manual":
+            with ScopedTimer("training.policy.ppo.grad_sync", sync=PROFILE_SYNC_TIMERS):
+                self._all_reduce_grads(self.actor, self.critic)
+        with ScopedTimer("training.policy.ppo.clip_grad", sync=PROFILE_SYNC_TIMERS):
+            actor_grad_norm = nn.utils.clip_grad_norm_(
+                self.actor.parameters(), self.cfg.max_grad_norm
+            )
+            critic_grad_norm = nn.utils.clip_grad_norm_(
+                self.critic.parameters(), self.cfg.max_grad_norm
+            )
+        with ScopedTimer(
+            "training.policy.ppo.optimizer_step", sync=PROFILE_SYNC_TIMERS
+        ):
+            self.opt_policy.step()
+            self.opt_critic.step()
+
+        value_loss = value_loss_sum / valid_count
+        policy_loss = policy_loss_sum / valid_count
+        entropy = entropy_sum / sample_count
+        ratio_count = torch.as_tensor(numel, device=self.device, dtype=torch.float32)
+        clipfrac = clip_sum / ratio_count
+        kl = kl_sum / sample_count
+        mean_std = scale_sum / scale_count.clamp_min(1)
+
+        with torch.no_grad():
+            b_returns_all = tensordict["ret"]
+            explained_var = 1 - value_loss / b_returns_all[valid_all].var(
+                dim=0, unbiased=False
+            )
+
+        info = {
+            "actor/policy_loss": policy_loss.detach(),
+            "actor/clamp_ratio": clipfrac.detach(),
+            "actor/entropy": entropy.detach(),
+            "actor/mean_std": mean_std.detach(),
             "actor/kl": kl.detach(),
             "opt/grad_norm.actor": actor_grad_norm.detach(),
             "opt/grad_norm.critic": critic_grad_norm.detach(),
