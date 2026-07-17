@@ -16,7 +16,7 @@ motion_cfgs:
     path: "../any4hdmi/output/g1/sonic"
     filenames_path: limmt/passed/filenames.txt
     weight: 0.25
-    full_motion: false
+    full_motion: true
     shard: true
 
   # ground sum: 0.05
