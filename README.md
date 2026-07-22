@@ -106,6 +106,19 @@ uv --project venv/mjlab run projects/mimic-lite/scripts/train.py \
   '~task.randomization'
 ```
 
+For the current 36-motion dataset, the recommended single-GPU training budget is 1,000 PPO iterations with 8,192 environments. The entropy schedule is shortened to match this budget; the task randomization and actuator delay remain enabled. Save every 100 iterations and use per-motion evaluation to select the best checkpoint rather than assuming the final checkpoint is best.
+
+```bash
+CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
+uv --project venv/mjlab run python projects/mimic-lite/scripts/train.py \
+  task=tracking-base-bumi task/motion=bumi/omni \
+  +exp=ppo/train backend=mjlab \
+  task.num_envs=8192 total_iters=1000 \
+  algo.entropy_decay_start=600 algo.entropy_decay_end=800 \
+  checkpoint_interval=100 upload_interval=200 \
+  wandb.mode=online
+```
+
 For a single-motion mapping/overfit check, replace `task/motion=bumi/omni` with `task/motion=bumi/single`. Checkpoints intended for deployment should be trained with the actuator delay enabled; `~task.randomization` removes the other task randomizations only.
 
 Evaluate a checkpoint and emit per-motion coverage/progress metrics:
