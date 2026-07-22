@@ -66,7 +66,10 @@ class BumiMotionDatasetTest(unittest.TestCase):
                 output = root / "output"
 
                 result = MODULE.prepare_bumi_motion_dataset(
-                    source, output, link_mode=link_mode
+                    source,
+                    output,
+                    link_mode=link_mode,
+                    report_json=root / "report.json",
                 )
 
                 motion_path = output / "walk" / "motion.npz"
@@ -77,6 +80,9 @@ class BumiMotionDatasetTest(unittest.TestCase):
                 self.assertEqual(meta["fps"], 50)
                 self.assertEqual(len(meta["joint_names"]), 21)
                 self.assertEqual(len(meta["body_names"]), 23)
+                report = json.loads((root / "report.json").read_text())
+                self.assertEqual(report["max_motion_root_pos_abs"], 0.0)
+                self.assertEqual(report["max_motion_root_quat_error"], 0.0)
 
     def test_missing_field_and_bad_shapes_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -135,6 +141,37 @@ class BumiMotionDatasetTest(unittest.TestCase):
                 source, output, link_mode="copy", force=True
             )
             self.assertEqual(result["status"], "replaced")
+
+    def test_quality_report_selects_only_automatic_training_ready_clips(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            conversion = root / "conversion"
+            source = conversion / "tracker_50hz"
+            source.mkdir(parents=True)
+            _write_motion(source / "accepted.npz")
+            _write_motion(source / "review.npz")
+            quality_report = conversion / "reports" / "quality_summary.json"
+            quality_report.parent.mkdir()
+            quality_report.write_text(
+                json.dumps(
+                    {
+                        "conversion_root": str(conversion.resolve()),
+                        "automatic_training_ready_clip_ids": ["accepted"],
+                    }
+                )
+            )
+
+            output = root / "output"
+            result = MODULE.prepare_bumi_motion_dataset(
+                source,
+                output,
+                quality_report=quality_report,
+            )
+
+            self.assertEqual(result["motions"], 1)
+            self.assertEqual(result["selection"], "automatic_training_ready_clip_ids")
+            self.assertTrue((output / "accepted" / "motion.npz").is_symlink())
+            self.assertFalse((output / "review").exists())
 
 
 if __name__ == "__main__":

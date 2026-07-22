@@ -17,6 +17,12 @@ from uuid import uuid4
 
 import numpy as np
 
+from mimic_lite_conversion.bumi import (
+    BUMI_V1_TRAINING_MAX_BODY_ANGULAR_VELOCITY_NORM,
+    BUMI_V1_TRAINING_MAX_BODY_LINEAR_VELOCITY_NORM,
+    BUMI_V1_TRAINING_MAX_JOINT_VELOCITY_ABS,
+)
+
 REQUIRED_FIELDS = (
     "fps",
     "joint_pos",
@@ -87,6 +93,10 @@ class MotionStats:
     max_body_lin_vel_norm: float
     max_body_ang_vel_norm: float
     max_body_quat_norm_error: float
+    max_motion_root_pos_abs: float
+    max_motion_root_quat_error: float
+    max_motion_root_lin_vel_abs: float
+    max_motion_root_ang_vel_abs: float
 
 
 def validate_motion(path: Path) -> MotionStats:
@@ -131,13 +141,31 @@ def validate_motion(path: Path) -> MotionStats:
     body_lin_vel_norm = np.linalg.norm(arrays["body_lin_vel_w"], axis=-1)
     body_ang_vel_norm = np.linalg.norm(arrays["body_ang_vel_w"], axis=-1)
     body_quat_norm_error = np.abs(np.linalg.norm(arrays["body_quat_w"], axis=-1) - 1.0)
+    motion_root_quat = arrays["body_quat_w"][:, 0]
+    identity = np.asarray([1.0, 0.0, 0.0, 0.0])
+    motion_root_quat_error = np.minimum(
+        np.linalg.norm(motion_root_quat - identity, axis=-1),
+        np.linalg.norm(motion_root_quat + identity, axis=-1),
+    )
 
     checks = (
         ("joint_pos abs", joint_pos_abs, 3.0),
-        ("joint_vel abs", joint_vel_abs, 20.0),
+        (
+            "joint_vel abs",
+            joint_vel_abs,
+            BUMI_V1_TRAINING_MAX_JOINT_VELOCITY_ABS,
+        ),
         ("body_pos z", body_pos_z, 2.5),
-        ("body_lin_vel norm", body_lin_vel_norm, 10.0),
-        ("body_ang_vel norm", body_ang_vel_norm, 30.0),
+        (
+            "body_lin_vel norm",
+            body_lin_vel_norm,
+            BUMI_V1_TRAINING_MAX_BODY_LINEAR_VELOCITY_NORM,
+        ),
+        (
+            "body_ang_vel norm",
+            body_ang_vel_norm,
+            BUMI_V1_TRAINING_MAX_BODY_ANGULAR_VELOCITY_NORM,
+        ),
         ("body_quat norm error", body_quat_norm_error, QUAT_NORM_ATOL),
     )
     for label, values, upper_bound in checks:
@@ -160,6 +188,18 @@ def validate_motion(path: Path) -> MotionStats:
         max_body_lin_vel_norm=float(body_lin_vel_norm.max(initial=0.0)),
         max_body_ang_vel_norm=float(body_ang_vel_norm.max(initial=0.0)),
         max_body_quat_norm_error=float(body_quat_norm_error.max(initial=0.0)),
+        max_motion_root_pos_abs=float(
+            np.abs(arrays["body_pos_w"][:, 0]).max(initial=0.0)
+        ),
+        max_motion_root_quat_error=float(
+            motion_root_quat_error.max(initial=0.0)
+        ),
+        max_motion_root_lin_vel_abs=float(
+            np.abs(arrays["body_lin_vel_w"][:, 0]).max(initial=0.0)
+        ),
+        max_motion_root_ang_vel_abs=float(
+            np.abs(arrays["body_ang_vel_w"][:, 0]).max(initial=0.0)
+        ),
     )
 
 
@@ -208,6 +248,8 @@ def prepare_bumi_motion_dataset(
     *,
     link_mode: Literal["symlink", "copy"] = "symlink",
     force: bool = False,
+    report_json: Path | None = None,
+    quality_report: Path | None = None,
 ) -> dict[str, int | float | str]:
     source = source.expanduser().resolve()
     output = output.expanduser().resolve()
@@ -216,6 +258,35 @@ def prepare_bumi_motion_dataset(
     motion_paths = sorted(source.glob("*.npz"))
     if not motion_paths:
         raise FileNotFoundError(f"No NPZ motions found directly under {source}")
+    selection = "all"
+    if quality_report is not None:
+        quality_path = quality_report.expanduser().resolve()
+        quality = json.loads(quality_path.read_text(encoding="utf-8"))
+        expected_source = (
+            Path(quality["conversion_root"]).expanduser().resolve() / "tracker_50hz"
+        )
+        if expected_source != source:
+            raise ValueError(
+                "Quality report does not describe the requested source: "
+                f"{expected_source} / {source}"
+            )
+        selected_ids = quality.get("automatic_training_ready_clip_ids")
+        if not isinstance(selected_ids, list) or not all(
+            isinstance(value, str) for value in selected_ids
+        ):
+            raise ValueError(
+                "Quality report is missing automatic_training_ready_clip_ids"
+            )
+        paths_by_id = {path.stem: path for path in motion_paths}
+        missing = sorted(set(selected_ids) - set(paths_by_id))
+        if missing:
+            raise ValueError(
+                "Quality report selects missing tracker clips: " + ", ".join(missing)
+            )
+        motion_paths = [paths_by_id[identifier] for identifier in selected_ids]
+        if not motion_paths:
+            raise ValueError("Quality report selected no automatic training-ready clips")
+        selection = "automatic_training_ready_clip_ids"
     if link_mode not in {"symlink", "copy"}:
         raise ValueError(f"Unsupported link mode: {link_mode}")
 
@@ -252,6 +323,7 @@ def prepare_bumi_motion_dataset(
         "motions": len(motion_paths),
         "frames": sum(item.frames for item in stats),
         "fps": 50,
+        "selection": selection,
         "max_joint_pos_abs": max(item.max_joint_pos_abs for item in stats),
         "max_joint_vel_abs": max(item.max_joint_vel_abs for item in stats),
         "max_body_pos_z": max(item.max_body_pos_z for item in stats),
@@ -260,7 +332,37 @@ def prepare_bumi_motion_dataset(
         "max_body_quat_norm_error": max(
             item.max_body_quat_norm_error for item in stats
         ),
+        "max_motion_root_pos_abs": max(item.max_motion_root_pos_abs for item in stats),
+        "max_motion_root_quat_error": max(
+            item.max_motion_root_quat_error for item in stats
+        ),
+        "max_motion_root_lin_vel_abs": max(
+            item.max_motion_root_lin_vel_abs for item in stats
+        ),
+        "max_motion_root_ang_vel_abs": max(
+            item.max_motion_root_ang_vel_abs for item in stats
+        ),
     }
+    if report_json is not None:
+        report_output = report_json.expanduser().resolve()
+        report_output.parent.mkdir(parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                prefix=f".{report_output.name}.",
+                dir=report_output.parent,
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                json.dump(result, stream, indent=2, sort_keys=True)
+                stream.write("\n")
+            os.replace(temporary, report_output)
+            temporary = None
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
     print(
         "Prepared Bumi motions:",
         " ".join(f"{key}={value}" for key, value in result.items()),
@@ -283,6 +385,12 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--link-mode", choices=("symlink", "copy"), default="symlink")
     parser.add_argument("--force", action="store_true")
+    parser.add_argument("--report-json", type=Path)
+    parser.add_argument(
+        "--quality-report",
+        type=Path,
+        help="Stage only automatic_training_ready_clip_ids from a quality report.",
+    )
     return parser.parse_args()
 
 
@@ -293,6 +401,8 @@ def main() -> None:
         args.output,
         link_mode=args.link_mode,
         force=args.force,
+        report_json=args.report_json,
+        quality_report=args.quality_report,
     )
 
 

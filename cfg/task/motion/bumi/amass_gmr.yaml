@@ -1,0 +1,10 @@
+# @package task.command
+
+windowed_next_window_device: current
+windowed_pin_window_load: true
+motion_cfgs:
+  bumi_amass_gmr_train:
+    path: ".cache/mimic-lite/motions/bumi/amass_gmr_train"
+    weight: 1.0
+    full_motion: false
+    shard: false
