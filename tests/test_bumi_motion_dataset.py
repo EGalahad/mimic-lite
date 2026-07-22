@@ -156,6 +156,7 @@ class BumiMotionDatasetTest(unittest.TestCase):
                 json.dumps(
                     {
                         "conversion_root": str(conversion.resolve()),
+                        "pipeline_integrity_ready": True,
                         "automatic_training_ready_clip_ids": ["accepted"],
                     }
                 )
@@ -172,6 +173,22 @@ class BumiMotionDatasetTest(unittest.TestCase):
             self.assertEqual(result["selection"], "automatic_training_ready_clip_ids")
             self.assertTrue((output / "accepted" / "motion.npz").is_symlink())
             self.assertFalse((output / "review").exists())
+
+            quality_report.write_text(
+                json.dumps(
+                    {
+                        "conversion_root": str(conversion.resolve()),
+                        "pipeline_integrity_ready": False,
+                        "automatic_training_ready_clip_ids": ["accepted"],
+                    }
+                )
+            )
+            with self.assertRaisesRegex(ValueError, "pipeline_integrity_ready"):
+                MODULE.prepare_bumi_motion_dataset(
+                    source,
+                    root / "blocked-output",
+                    quality_report=quality_report,
+                )
 
 
 if __name__ == "__main__":

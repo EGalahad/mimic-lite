@@ -270,6 +270,12 @@ def prepare_bumi_motion_dataset(
                 "Quality report does not describe the requested source: "
                 f"{expected_source} / {source}"
             )
+        if quality.get("pipeline_integrity_ready") is not True:
+            raise ValueError(
+                "Quality report has not passed pipeline_integrity_ready; "
+                "resolve rejects, missing clips, stale provenance, or physical-limit "
+                "violations before staging"
+            )
         selected_ids = quality.get("automatic_training_ready_clip_ids")
         if not isinstance(selected_ids, list) or not all(
             isinstance(value, str) for value in selected_ids
