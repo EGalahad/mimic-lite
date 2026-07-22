@@ -78,6 +78,47 @@ Each `motion_cfgs` entry controls partitioning and runtime storage independently
 - `shard: true` gives each distributed rank a disjoint, motion-aligned subset; it defaults to `false`.
 - `full_motion: true` keeps the visible dataset resident in GPU memory, while `false` uses persistent window pools with asynchronous prefetching.
 
+### Bumi tracker (MJLab)
+
+Bumi uses a local MJCF/mesh cache and the 36 gait NPZ files from the Bumi MJLab reference repository. Generated assets and motion wrappers stay under `.cache/` and are not committed.
+
+```bash
+export BUMI_REF=/path/to/AMP_mjlab_bumi_worktree
+
+uv --project venv/mjlab run projects/mimic-lite/scripts/prepare_bumi_assets.py \
+  --source "$BUMI_REF/src/assets/robots/bumi/xmls"
+
+uv --project venv/mjlab run projects/mimic-lite/scripts/prepare_bumi_motion_dataset.py \
+  --source "$BUMI_REF/src/assets/motions/bumi/amp" \
+  --link-mode symlink
+```
+
+The Bumi MJLab actuators model a 0–4 physics-step position-command delay. The task-level `JointPosition` delay is disabled so latency is applied exactly once. MJLab 1.3 fuses identical builtin actuator delay configurations, so this first version samples one lag per environment for the shared command path; it does not claim independent per-motor lag.
+
+Run a 16-environment, one-update smoke test over the full 36-motion dataset:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
+uv --project venv/mjlab run projects/mimic-lite/scripts/train.py \
+  task=tracking-base-bumi task/motion=bumi/omni \
+  +exp=ppo/train backend=mjlab task.num_envs=16 total_iters=1 \
+  wandb.mode=disabled checkpoint_interval=100 upload_interval=100 \
+  '~task.randomization'
+```
+
+For a single-motion mapping/overfit check, replace `task/motion=bumi/omni` with `task/motion=bumi/single`. Checkpoints intended for deployment should be trained with the actuator delay enabled; `~task.randomization` removes the other task randomizations only.
+
+Evaluate a checkpoint and emit per-motion coverage/progress metrics:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
+uv --project venv/mjlab run projects/mimic-lite/scripts/eval.py \
+  task=tracking-base-bumi task/motion=bumi/omni backend=mjlab \
+  task.num_envs=512 eval_steps=1000 checkpoint_path=/absolute/path/to/checkpoint.pt \
+  eval_output=bumi_eval.pt eval_summary_output=bumi_eval.json \
+  +store_rollout=false '~task.randomization'
+```
+
 The default G1 mixture enables sharding only for the full SONIC dataset.
 
 Play a PPO checkpoint:

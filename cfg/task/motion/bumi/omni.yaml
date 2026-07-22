@@ -1,0 +1,8 @@
+# @package task.command
+
+motion_cfgs:
+  bumi_omni:
+    path: ".cache/mimic-lite/motions/bumi/omni"
+    weight: 1.0
+    full_motion: true
+    shard: false

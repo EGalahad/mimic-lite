@@ -7,7 +7,10 @@ import torch
 import active_adaptation as aa
 from any4hdmi import FullMotionDataset, MotionData
 
-aa.set_backend("mjlab")
+try:
+    aa.get_backend()
+except RuntimeError:
+    aa.set_backend("mjlab")
 from mimic_lite.tasks import multi_dataset as multi_dataset_module  # noqa: E402
 from mimic_lite.tasks.multi_dataset import (  # noqa: E402
     MotionDatasetConfig,
