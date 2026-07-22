@@ -134,6 +134,39 @@ uv --project venv/mjlab run projects/mimic-lite/scripts/eval.py \
 
 The default G1 mixture enables sharding only for the full SONIC dataset.
 
+Visualize the completed 1,000-iteration Bumi run with the repository-level
+`scripts/play.py`. The project currently imports the Atom and G1 asset modules
+alongside Bumi, so this command forces Hugging Face into offline mode and
+removes malformed `socks://` proxy variables before resolving the already
+cached asset snapshots:
+
+```bash
+env \
+  -u ALL_PROXY -u all_proxy \
+  -u HTTP_PROXY -u http_proxy \
+  -u HTTPS_PROXY -u https_proxy \
+  -u SOCKS_PROXY -u socks_proxy \
+  CUDA_VISIBLE_DEVICES=0 \
+  HF_HUB_OFFLINE=1 \
+  HF_HUB_DISABLE_TELEMETRY=1 \
+  HF_HUB_CACHE=/home/jun7.shi/.cache/huggingface/hub \
+  uv --project venv/mjlab run python scripts/play.py \
+    task=tracking-base-bumi task/motion=bumi/omni \
+    +exp=ppo/train backend=mjlab task.num_envs=1 \
+    +task.command.start_from_zero=true \
+    task.command.init_joint_pos_noise=0 \
+    task.command.init_joint_vel_noise=0 \
+    task.termination.root_pos_error.enabled=false \
+    checkpoint_path=outputs/2026-07-22/23-55-41-BumiTrackBase-mimic_lite_ppo/checkpoint_latest.pt \
+    '~task.randomization'
+```
+
+`checkpoint_latest.pt` currently resolves to `checkpoint_1000.pt`. Each episode
+selects one of the 36 motions and starts it from the beginning. This clean
+visualization removes task randomization and initial joint-state noise, but it
+keeps the actuator-configured 0--4 physics-step delay. Initial startup may spend
+several seconds compiling CUDA kernels before the viewer appears.
+
 Play a PPO checkpoint:
 
 ```bash
