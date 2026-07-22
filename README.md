@@ -121,6 +121,123 @@ uv --project venv/mjlab run python projects/mimic-lite/scripts/train.py \
 
 For a single-motion mapping/overfit check, replace `task/motion=bumi/omni` with `task/motion=bumi/single`. Checkpoints intended for deployment should be trained with the actuator delay enabled; `~task.randomization` removes the other task randomizations only.
 
+#### AMASS → HumanPose24 → GMR → Bumi
+
+The AMASS conversion path uses the same XRobot/Pico `HumanPose24` contract and
+`xrobot_to_bumi` GMR configuration as the online publisher. It preserves each
+clip's native 60 or 120 Hz timeline through SMPL-X FK and causal GMR, then
+resamples Bumi qpos exactly once to the tracker's 50 Hz grid. Body poses and
+velocities are recomputed with the exact Bumi MJCF after resampling. GMR uses
+the real source `dt` to enforce the same causal Bumi joint/root velocity limits
+as the Pico publisher; the emitted state becomes the next IK warm start.
+
+Set the local paths first:
+
+```bash
+export AMASS_ROOT=/data/jun7.shi/datasets/AMASS/AMASS
+export GMR_ROOT=/data/jun7.shi/code/poc/github/UniLab/thirdparty/GMR
+export SMPLX_MODEL_DIR=/data/jun7.shi/code/poc/hr/HoloMotion/thirdparties/smpl_models/models
+export BUMI_MJCF="$PWD/.cache/aa-robot-models/bumi/bumi.xml"
+export RETARGET_ROOT="$PWD/.cache/mimic-lite/retarget/bumi/amass"
+```
+
+Build SHA256-addressed manifests with a deterministic subject-level train/val
+split. The checked local CMU inventory contains 1,983 clips: 1,787 train and
+196 held out, with no rejected source files.
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run python \
+  projects/mimic-lite/scripts/build_amass_manifest.py \
+  --amass-root "$AMASS_ROOT" \
+  --output "$RETARGET_ROOT/manifests" \
+  --fixture-count 3 --pilot-count 30
+```
+
+Convert the three-clip fixture. `--actual-human-height=1.6` deliberately
+matches the default Bumi Pico publisher setting; change both sides together if
+the calibrated operator height differs.
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python projects/mimic-lite/scripts/convert_amass_to_bumi_tracker.py \
+  --manifest "$RETARGET_ROOT/manifests/fixture_3.jsonl" \
+  --smplx-model-dir "$SMPLX_MODEL_DIR" \
+  --gmr-root "$GMR_ROOT" \
+  --bumi-mjcf "$BUMI_MJCF" \
+  --actual-human-height 1.6 --target-fps 50 \
+  --output "$RETARGET_ROOT/fixture_3" \
+  --workers 1 --resume --fail-on-reject
+```
+
+The tested fixture has 3,813 native frames and 2,029 final frames. All three
+clips pass the root/foot position and orientation gates, both native and final
+joint-velocity ratios stay at or below 1.0, and a second run is served entirely
+from the provenance-checked cache.
+
+Stage those files and run the tested AMASS-only smoke:
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run python \
+  projects/mimic-lite/scripts/prepare_bumi_motion_dataset.py \
+  --source "$RETARGET_ROOT/fixture_3/tracker_50hz" \
+  --output .cache/mimic-lite/motions/bumi/amass_gmr_train \
+  --link-mode symlink --force
+
+CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
+uv --project venv/mjlab run python projects/mimic-lite/scripts/train.py \
+  task=tracking-base-bumi task/motion=bumi/amass_gmr \
+  +exp=ppo/train backend=mjlab task.num_envs=16 total_iters=1 \
+  checkpoint_path=null wandb.mode=disabled '~task.randomization'
+```
+
+Run the pilot by changing the manifest/output above to `pilot_20_50.jsonl` and
+`$RETARGET_ROOT/pilot_20_50`, then build its quality split:
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run python \
+  projects/mimic-lite/scripts/report_bumi_retarget_quality.py \
+  --conversion-root "$RETARGET_ROOT/pilot_20_50" \
+  --manifest "$RETARGET_ROOT/manifests/pilot_20_50.jsonl"
+
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run python \
+  projects/mimic-lite/scripts/prepare_bumi_motion_dataset.py \
+  --source "$RETARGET_ROOT/pilot_20_50/tracker_50hz" \
+  --quality-report "$RETARGET_ROOT/pilot_20_50/reports/quality_summary.json" \
+  --output .cache/mimic-lite/motions/bumi/amass_gmr_pilot_v2 \
+  --link-mode symlink
+```
+
+The tested 30-clip pilot converted 73,156 native frames into 32,334 tracker
+frames with zero conversion rejects. `pipeline_integrity_ready=true`: native
+and final velocity ratios are at most 1.0, quaternion error is below `5e-8`,
+and the `motion_root` contract is exact. The conservative automatic split has
+14 clips/14,501 frames; 6 clips require geometry review and 10 require dynamics
+review. A 16-env, one-update PPO smoke on the 14 automatic clips completes
+without NaNs.
+
+For production, repeat conversion and reporting independently for `train.jsonl`
+and `val.jsonl`, and always stage with `--quality-report`; this prevents review
+clips from silently entering training. Stage the accepted train/val outputs as
+`amass_gmr_train` and `amass_gmr_val`. The candidate mixture samples AMASS at
+0.8 and the original 36 gait clips at 0.2. Its formal single-GPU run starts
+from random weights and keeps the Bumi actuator delay/randomization enabled:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
+uv --project venv/mjlab run python projects/mimic-lite/scripts/train.py \
+  task=tracking-base-bumi task/motion=bumi/amass_gmr_omni \
+  +exp=ppo/train backend=mjlab \
+  task.num_envs=8192 total_iters=4000 checkpoint_path=null \
+  checkpoint_interval=500 upload_interval=500 wandb.mode=online
+```
+
 Evaluate a checkpoint and emit per-motion coverage/progress metrics:
 
 ```bash

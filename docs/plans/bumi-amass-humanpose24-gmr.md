@@ -1,6 +1,8 @@
 # Bumi AMASS → HumanPose24 → GMR 数据与从头训练计划
 
-状态：待实施
+状态：v1 已完成三条 fixture、30 条真实 AMASS pilot、质量分流和 14 条自动通过数据的
+16-env PPO smoke；production 扩批、正式 4,000-iteration 训练与真实 Pico corruption
+仍待执行
 
 日期：2026-07-23
 
@@ -151,7 +153,11 @@ HumanPose24 clean conversion 中不加入 Pico 噪声、丢帧、延迟或滤波
 - sim2real 已直接把 Pico/XRobot 数据送进 GMR，并由 `RealtimeMotionBuffer` 在 50 Hz policy 时钟上做 position interpolation 和 quaternion SLERP。
 - any4hdmi 已有经过测试的 `resampled_length`、linear interpolation 和 quaternion SLERP，可以复用其时间网格/SLERP测试思路。
 
-### 3.2 当前缺口
+### 3.2 实施前缺口
+
+以下是计划冻结时的缺口；截至 2026-07-23，1--6 已由 GMR、sim2real 和
+mimic-lite 的 v1 实现及测试关闭，第 7 项的 clean configs/smoke 已完成，真实 Pico
+统计校准的 corruption 仍后置。
 
 1. GMR 的 SMPL-X offline helper 默认 `tgt_fps=30`，不符合本计划的 native-timeline 决策。
 2. `smpl_stream.compute_human_joints_np` 已能得到 24 个位置，但没有输出与 XRobot body frame 对齐的 24 个世界系 quaternion。
@@ -184,7 +190,7 @@ TRACKER_DATA_ROOT=$AA_ROOT/.cache/mimic-lite/motions/bumi/amass_gmr
 | GMR | HumanPose24 contract、SMPL-X adapter、Bumi kinematic model、`xrobot_to_bumi` IK 配置和纯 retarget API | MimicLite NPZ/训练配置 |
 | sim2real | Pico wire/timestamp、Bumi `RobotCfg`、在线 publisher 选择 Bumi、online/offline parity fixture | AMASS 批处理和训练数据打包 |
 | mimic-lite | AMASS batch orchestration、50 Hz Bumi exporter、质量报告、motion config、训练/eval | 重新实现 GMR IK |
-| robot_retargeter | 只作为 Bumi constraint 和数值效果参考 | 不作为本链路 runtime；不复制其 bidirectional/zero-phase 行为 |
+| robot_retargeter | 不作为主要方案依据；最多只核对已有 Bumi constraint | 不作为本链路 runtime；不复制其 bidirectional/zero-phase 行为 |
 
 实施前必须再次记录四个 repo 的 commit 和 dirty state。当前 `robot_retargeter` worktree 含其他任务的未提交改动，本计划不能在该 worktree 上继续叠加修改；GMR 改动应在其独立干净分支完成。
 
@@ -220,8 +226,8 @@ TRACKER_DATA_ROOT=$AA_ROOT/.cache/mimic-lite/motions/bumi/amass_gmr
 
 | 文件 | 操作 | 目的 |
 | --- | --- | --- |
-| `mimic_lite/motion_conversion/bumi.py` | 新增 | qpos time resample、MuJoCo FK/velocity、tracking NPZ contract |
-| `mimic_lite/motion_conversion/amass_gmr.py` | 新增 | manifest、resume、cache、diagnostics 和 batch orchestration |
+| `mimic_lite_conversion/bumi.py` | 新增 | qpos time resample、MuJoCo FK/velocity、tracking NPZ contract |
+| `mimic_lite_conversion/amass_gmr.py` | 新增 | manifest、resume、cache、diagnostics 和 batch orchestration |
 | `scripts/convert_amass_to_bumi_tracker.py` | 新增 | 薄 CLI；业务规则留在模块内 |
 | `scripts/prepare_bumi_motion_dataset.py` | 小改 | 支持明确的 split/input manifest，同时继续强校验最终 50 Hz |
 | `cfg/task/motion/bumi/amass_gmr.yaml` | 新增 | AMASS-only train dataset |
@@ -425,7 +431,9 @@ joint/body names 不塞进每个 NPZ，继续由 `meta.json` 提供；同时在 
 
 - `prepare_bumi_motion_dataset.validate_motion` 通过。
 - `fps` 必须恰好是 50；源 FPS 仅保存在 provenance，不覆盖最终 `fps`。
-- 输出帧数符合公式，duration drift `< 0.5 / 50 s`。
+- 输出帧数符合 floor 时间网格公式；因目标点不得超出源区间，末尾截断
+  duration drift 必须满足绝对值 `< 1 / 50 s`。不能用越界外推或不等间隔末帧
+  人为满足半帧阈值。
 - quaternion norm error `< 1e-5`，没有 NaN/Inf。
 - 将保存的 50 Hz joint/root pose 重做 FK，与保存 body pose 的最大误差接近数值精度；position `< 1e-5 m`，orientation `< 1e-4 rad`。
 - 从保存 pose 重算 velocity 与保存 velocity 一致；不出现由 double resampling 产生的相位差。
@@ -457,6 +465,9 @@ joint/body names 不塞进每个 NPZ，继续由 `meta.json` 提供；同时在 
 - feet 长时间明显穿地；
 - 50 Hz velocity 超过 Bumi 可接受上限且不是可解释的短暂动态动作。
 
+报告将这组结构/物理契约汇总为 `pipeline_integrity_ready`。因果 GMR 输出和最终
+50 Hz 数据都按 joint family 对照电机限速，不能只看一个全局 rad/s 数字。
+
 软标记但先不删除：
 
 - foot sliding；
@@ -464,7 +475,22 @@ joint/body names 不塞进每个 NPZ，继续由 `meta.json` 提供；同时在 
 - 动作超出 Bumi DoF 导致的 residual；
 - 短时高速或低 crouch。
 
-软标记数据先进入单独 view，经过物理 replay/eval 再决定是否训练，避免仅凭人工阈值删掉有价值的动态动作。
+软标记数据先进入单独 view，经过物理 replay/eval 再决定是否训练，避免仅凭人工阈值删掉有价值的动态动作。v1 自动训练集是完整性通过、几何 gate 通过，并且同时满足保守 staging 门槛（joint velocity `<20 rad/s`、body linear velocity `<10 m/s`、body angular velocity `<30 rad/s`）的交集。这里 20 rad/s 是训练数据的保守门槛，不替代手臂电机 50 rad/s 等真实 joint-family 上限：介于两者之间的数据进入 `dynamics_review`，不是硬损坏。
+
+#### 6.2.1 已执行的 30 条 pilot（2026-07-23）
+
+- 输入：30 clips、73,156 native frames，含 24 条 120 Hz 和 6 条 60 Hz；
+- 输出：30 clips、32,334 tracker frames，conversion reject 为 0；
+- `pipeline_integrity_ready=true`，native/final 最大 joint velocity ratio 分别约
+  `1.0000000000000022`/`1.0`，quaternion norm 最大误差 `<5e-8`，`motion_root`
+  contract error 为 0；
+- 自动训练集：14 clips、14,501 frames；
+- `geometry_review`：6 clips；`dynamics_review`：10 clips；三组互斥且覆盖 30 条；
+- 14 条自动训练集已通过 `prepare_bumi_motion_dataset.py`，并完成 16 env、1 PPO
+  update、随机初始化 smoke，无 NaN。
+
+14/30 不是保留率目标，只是这个覆盖性 pilot 在当前保守 gate 下的实测结果。扩到
+production 后继续保存 review 集；不能为提高保留率而事后放松阈值。
 
 #### 6.3 数据布局和配置
 
@@ -499,7 +525,7 @@ clean pipeline 和 clean from-scratch baseline 通过后，再实现 actor-visib
 
 #### 6.5 Gate 6
 
-- `fixture_3` 和 `pilot_20_50` 所有硬 gate 通过后才允许 production batch。
+- `fixture_3` 和 `pilot_20_50` 的 `pipeline_integrity_ready=true`，且自动训练子集非空后才允许 production batch；soft review clip 不进入默认 staging。
 - production report 可从 source relative path 追溯到 HumanPose24、GMR config/model hash 和最终 NPZ hash。
 - train/val source 无泄漏。
 - AMASS-only、mixture 和 val 配置都能 resolve 并完成 16-env、1-update smoke。
@@ -678,3 +704,77 @@ GMR 必须在该 teleop 环境中以锁定 revision/editable path 安装；不�
 - checkpoints、wandb 和 rollout。
 
 必须提交的是代码、small synthetic/prerecorded fixture（确认许可和体积后）、manifest schema、配置、测试和不含原始动作内容的汇总报告模板。
+
+## 11. ExtremControl 只读评估与 v2 边界
+
+本地只读参考仓库为
+`/data/jun7.shi/code/retarget/Genesis-Humanoid`。该 worktree 已有其他任务的未提交
+改动，本工作不修改、不提交其中任何文件。
+
+### 11.1 “50 ms”的正确含义
+
+ExtremControl 所称约 50 ms 是实机遥操作的端到端响应延迟，不是一个
+“HumanPose24 → robot qpos 的 50 ms retargeter”。其方案有三个耦合部分：
+
+1. 不在在线闭环中求 full-body joint-space retarget；而是把人体参考快速映射成
+   机器人 pelvis/torso、双足和双手等选定 link 的 SE(3) 目标。
+2. tracker/policy 直接观察当前机器人 link 与这些 extremity targets 的误差，输出
+   joint target；因此它改变 policy observation、reward、teacher/student 训练和部署
+   contract，不是替换一个 GMR backend 就能获得。
+3. 低层 PD 额外使用由连续 joint target 计算出的 target velocity feedforward；
+   论文和实现都把这部分视为降低整体响应时间的关键。
+
+项目页给出的量级是 Cartesian mapping 约 0.3 ms、定制 joint-space IK 约 10 ms，
+而约 50 ms 来自完整硬件链路测量。这个数字不能直接外推到 Bumi/Pico/MimicLite。
+
+### 11.2 v1 决策
+
+当前 v1 不改为 ExtremControl：
+
+- 离线仍是 `AMASS → HumanPose24 → GMR → Bumi qpos → 50 Hz tracker NPZ`；
+- 在线仍是 `Pico HumanPose24 → 同一 GMR → Bumi qpos reference → MimicLite`；
+- 不复制 `robot_retargeter` 的双向初始化或 zero-phase filter；
+- GMR 的逐 task position/orientation residual 已加入 provenance 和质量报告，先完成
+  pilot/production 数据闭环。
+
+原因是当前 MimicLite actor 的参考是完整 Bumi joint/body motion。仅把在线 GMR 换成
+Cartesian mapping 会使部署输入 contract 与训练 reference 不同，反而扩大 gap。
+
+### 11.3 v2 建议接口
+
+若 v1 的真实 Pico 端到端延迟或噪声测试不合格，再开独立 v2：
+
+~~~text
+HumanPose24
+  → BumiCartesianMapper（纯代数、无逐帧 IK）
+  → BumiExtremityCommand
+      pelvis/torso pose
+      left/right foot pose
+      left/right arm-endpoint pose（Bumi 无 wrist DoF，需定义 elbow 后 proxy）
+      timestamp + validity/confidence
+  → Extremity-conditioned Bumi policy
+  → target joint position + target joint velocity
+  → velocity-feedforward actuator/deployment controller
+~~~
+
+`BumiExtremityCommand` 应成为离线 AMASS 和在线 Pico 共用的可替换 backend contract；
+AMASS 直接从同一个 HumanPose24 adapter 生成 Cartesian command，不再先 GMR 成 qpos。
+GMR qpos 可保留为 teacher/critic privileged target 或对照，但不能继续作为在线 actor 的
+必需输入。
+
+### 11.4 v2 启动 gate
+
+只有以下测量完成后才值得迁移：
+
+1. 在 Pico timestamp、publisher、GMR、buffer、policy、PD 和实机观测各边界打点，得到
+   Bumi 的分段和端到端 p50/p95 latency；
+2. 用 prerecorded Pico 同动作比较 GMR v1 与 Cartesian mapping 的 reference jitter、
+   足端/手端误差和 drop/hold 行为；
+3. 证明 GMR 计算或 qpos reference 确实是主要瓶颈，而不是 Pico 发布、网络、policy、
+   电机 0--4 step delay 或 Bumi 机械响应；
+4. 在仿真中实现 position-only 与 velocity-feedforward 的受控对照，并确认 Bumi 电机接口
+   能安全接收 target velocity；
+5. v2 从头训练新的 extremity-conditioned policy，不能直接把现有 MimicLite checkpoint
+   当成兼容策略。
+
+因此，ExtremControl 是合理的第二版体系候选，但不是当前 GMR 数据转换 v1 的局部优化项。
