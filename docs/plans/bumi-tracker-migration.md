@@ -968,6 +968,8 @@ Motion metadata 在上述列表最前面增加 motion_root，共 23 项。
 
 当前 36 条 motion 只覆盖由 G1 SONIC omni retarget 得到的 locomotion gait。要达到 G1 mixture 的通用 tracker 能力，另建数据工作流：
 
+AMASS 首个完整实施方案见 [Bumi AMASS → HumanPose24 → GMR 数据与从头训练计划](bumi-amass-humanpose24-gmr.md)。该方案固定保留 AMASS 源时间轴经过 HumanPose24 与 GMR，只在最终 Bumi tracker NPZ 导出边界采样到 50 Hz，并要求正式策略从头训练。
+
 1. 对 LAFAN、100Style、AMASS、ground、extreme 等源动作逐库 retarget 到 Bumi。
 2. 输出 Bumi qpos，使用 Bumi MJCF 重新计算 FK。
 3. 对比 retarget 输出与 MuJoCo FK，确认 body pose、velocity 和 quaternion convention。
