@@ -9,16 +9,19 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 import hashlib
 import json
 import math
+import multiprocessing
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
 import tempfile
+import time
 from typing import Any
 
 import mujoco
@@ -887,16 +890,52 @@ class AmassToBumiConverter:
         return result
 
 
+def _finalize_batch(
+    entries: Sequence[AmassManifestEntry],
+    successes: Sequence[Mapping[str, Any]],
+    rejects: Sequence[Mapping[str, Any]],
+    *,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    output = Path(output_root).expanduser().resolve()
+    reports = output / "reports"
+    ordered_successes = sorted(
+        (dict(item) for item in successes),
+        key=lambda item: str(item.get("source_relative_path", "")),
+    )
+    ordered_rejects = sorted(
+        (dict(item) for item in rejects),
+        key=lambda item: str(item.get("source_relative_path", "")),
+    )
+    write_jsonl(reports / "converted.jsonl", ordered_successes)
+    write_jsonl(reports / "rejected.jsonl", ordered_rejects)
+    summary = {
+        "requested": len(entries),
+        "converted": sum(
+            item.get("status") == "converted" for item in ordered_successes
+        ),
+        "cached": sum(item.get("status") == "cached" for item in ordered_successes),
+        "succeeded": len(ordered_successes),
+        "rejected": len(ordered_rejects),
+        "source_frames": sum(
+            int(item.get("source_frames", 0)) for item in ordered_successes
+        ),
+        "tracker_frames": sum(
+            int(item.get("tracker_frames", 0)) for item in ordered_successes
+        ),
+    }
+    write_json(reports / "summary.json", summary)
+    return summary
+
+
 def run_batch(
     entries: Sequence[AmassManifestEntry],
     *,
     output_root: str | Path,
     converter: Callable[[AmassManifestEntry], Mapping[str, Any]],
 ) -> dict[str, Any]:
-    """Run every clip, isolating rejects and atomically materializing reports."""
+    """Run every clip sequentially, isolating rejects and writing reports."""
 
-    output = Path(output_root).expanduser().resolve()
-    reports = output / "reports"
     successes: list[dict[str, Any]] = []
     rejects: list[dict[str, Any]] = []
     for entry in entries:
@@ -911,16 +950,100 @@ def run_batch(
                     "error": str(exc),
                 }
             )
-    write_jsonl(reports / "converted.jsonl", successes)
-    write_jsonl(reports / "rejected.jsonl", rejects)
-    summary = {
-        "requested": len(entries),
-        "converted": sum(item.get("status") == "converted" for item in successes),
-        "cached": sum(item.get("status") == "cached" for item in successes),
-        "succeeded": len(successes),
-        "rejected": len(rejects),
-        "source_frames": sum(int(item.get("source_frames", 0)) for item in successes),
-        "tracker_frames": sum(int(item.get("tracker_frames", 0)) for item in successes),
-    }
-    write_json(reports / "summary.json", summary)
-    return summary
+    return _finalize_batch(
+        entries,
+        successes,
+        rejects,
+        output_root=output_root,
+    )
+
+
+_PROCESS_CONVERTER: AmassToBumiConverter | None = None
+
+
+def _initialize_converter_worker(
+    converter_kwargs: Mapping[str, Any],
+    torch_threads: int,
+) -> None:
+    global _PROCESS_CONVERTER
+    import torch
+
+    torch.set_num_threads(torch_threads)
+    torch.set_num_interop_threads(1)
+    _PROCESS_CONVERTER = AmassToBumiConverter(**dict(converter_kwargs))
+
+
+def _convert_in_worker(
+    entry: AmassManifestEntry,
+) -> tuple[bool, dict[str, Any]]:
+    if _PROCESS_CONVERTER is None:
+        raise RuntimeError("AMASS converter worker was not initialized")
+    try:
+        return True, dict(_PROCESS_CONVERTER.convert(entry))
+    except Exception as exc:
+        return False, {
+            "source_path": entry.source_path,
+            "source_relative_path": entry.relative_path,
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+
+
+def run_parallel_converter_batch(
+    entries: Sequence[AmassManifestEntry],
+    *,
+    output_root: str | Path,
+    converter_kwargs: Mapping[str, Any],
+    workers: int,
+    torch_threads_per_worker: int = 4,
+) -> dict[str, Any]:
+    """Convert independent clips in spawned workers and write one report set."""
+
+    if workers <= 1:
+        raise ValueError(f"Parallel conversion requires workers > 1, got {workers}")
+    if torch_threads_per_worker <= 0:
+        raise ValueError(
+            "torch_threads_per_worker must be positive, got "
+            f"{torch_threads_per_worker}"
+        )
+    worker_count = min(int(workers), len(entries))
+    context = multiprocessing.get_context("spawn")
+    successes: list[dict[str, Any]] = []
+    rejects: list[dict[str, Any]] = []
+    started_at = time.monotonic()
+    last_progress_at = started_at
+    with ProcessPoolExecutor(
+        max_workers=worker_count,
+        mp_context=context,
+        initializer=_initialize_converter_worker,
+        initargs=(dict(converter_kwargs), int(torch_threads_per_worker)),
+    ) as executor:
+        futures = [executor.submit(_convert_in_worker, entry) for entry in entries]
+        for completed_count, future in enumerate(as_completed(futures), start=1):
+            succeeded, result = future.result()
+            (successes if succeeded else rejects).append(result)
+            now = time.monotonic()
+            if (
+                completed_count == 1
+                or completed_count == len(entries)
+                or now - last_progress_at >= 30.0
+            ):
+                elapsed = max(now - started_at, 1.0e-9)
+                rate = completed_count / elapsed
+                remaining = (len(entries) - completed_count) / max(rate, 1.0e-9)
+                print(
+                    "AMASS -> Bumi progress:",
+                    f"completed={completed_count}/{len(entries)}",
+                    f"succeeded={len(successes)}",
+                    f"rejected={len(rejects)}",
+                    f"rate={rate:.2f}_clips/s",
+                    f"eta={remaining / 60.0:.1f}_min",
+                    flush=True,
+                )
+                last_progress_at = now
+    return _finalize_batch(
+        entries,
+        successes,
+        rejects,
+        output_root=output_root,
+    )
