@@ -2,10 +2,10 @@
 """Browse Bumi tracker NPZ motions with a lazy-loading Viser player.
 
 The player accepts either one tracker NPZ or a directory of NPZ files.  It
-renders Bumi through the same MuJoCo model used by the exporter and can overlay
-the body positions stored in the NPZ.  Only the selected clip is held in
-memory, so the full AMASS conversion can be browsed without loading every
-motion at startup.
+renders Bumi through the same MuJoCo model used by the exporter, the original
+SMPL-X FK motion saved before GMR as HumanPose24, and an optional final-Bumi-FK
+debug overlay.  Only the selected clip is held in memory, so the full AMASS
+conversion can be browsed without loading every motion at startup.
 """
 
 from __future__ import annotations
@@ -34,7 +34,66 @@ from mimic_lite_conversion.bumi import (
 _BASE_BODY_INDEX = BUMI_MOTION_BODY_NAMES.index("base_link")
 _POINT_COLOR = np.asarray([40, 180, 255], dtype=np.uint8)
 _LINE_COLOR = np.asarray([255, 186, 73], dtype=np.uint8)
+_SOURCE_POINT_COLOR = np.asarray([202, 132, 255], dtype=np.uint8)
+_SOURCE_LINE_COLOR = np.asarray([92, 230, 154], dtype=np.uint8)
 _DEFAULT_OVERLAY_Y_OFFSET = 0.6
+_DEFAULT_SOURCE_Y_OFFSET = -1.0
+_HUMAN_POSE24_NAMES = (
+    "Pelvis",
+    "Left_Hip",
+    "Right_Hip",
+    "Spine1",
+    "Left_Knee",
+    "Right_Knee",
+    "Spine2",
+    "Left_Ankle",
+    "Right_Ankle",
+    "Spine3",
+    "Left_Foot",
+    "Right_Foot",
+    "Neck",
+    "Left_Collar",
+    "Right_Collar",
+    "Head",
+    "Left_Shoulder",
+    "Right_Shoulder",
+    "Left_Elbow",
+    "Right_Elbow",
+    "Left_Wrist",
+    "Right_Wrist",
+    "Left_Hand",
+    "Right_Hand",
+)
+_HUMAN_POSE24_PARENTS = (
+    -1,
+    0,
+    0,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    9,
+    9,
+    12,
+    13,
+    14,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+)
+_HUMAN_POSE24_LINKS = tuple(
+    (parent, child) for child, parent in enumerate(_HUMAN_POSE24_PARENTS) if parent >= 0
+)
+_HUMAN_POSE24_PELVIS_INDEX = _HUMAN_POSE24_NAMES.index("Pelvis")
 _QUALITY_REPORT_FIELDS = {
     "automatic": "automatic_training_ready_clip_ids",
     "geometry_review": "geometry_review_clip_ids",
@@ -71,12 +130,25 @@ class TrackingClip:
         return max(0, self.frame_count - 1) / self.fps
 
 
+@dataclass(frozen=True)
+class SourcePose24:
+    path: Path
+    body_pos_w: np.ndarray
+    timestamps_s: np.ndarray
+    source_fps: float
+
+    @property
+    def frame_count(self) -> int:
+        return int(self.body_pos_w.shape[0])
+
+
 @dataclass
 class PlaybackState:
     clip_index: int
     clip: TrackingClip
     joint_qpos_addresses: tuple[int, ...]
     joint_dof_addresses: tuple[int, ...]
+    source_pose: SourcePose24 | None
     frame: int = 0
     paused: bool = False
 
@@ -273,6 +345,135 @@ def load_tracking_clip(entry: ClipEntry) -> TrackingClip:
     )
 
 
+def resolve_source_pose_path(
+    entry: ClipEntry,
+    source_pose_dir: Path | None,
+) -> Path | None:
+    candidates: list[Path] = []
+    if source_pose_dir is not None:
+        configured = source_pose_dir.expanduser().resolve()
+        candidates.append(
+            configured if configured.is_file() else configured / f"{entry.clip_id}.npz"
+        )
+
+    # Production conversion layout:
+    #   <split>/tracker_50hz/<clip>.npz
+    #   <split>/human_pose24/<clip>.npz
+    # Check the unresolved and resolved paths so staged tracker symlinks can
+    # still find their original source pose.
+    for tracker_path in (entry.path, entry.path.resolve()):
+        if tracker_path.parent.name == "tracker_50hz":
+            candidates.append(
+                tracker_path.parent.parent / "human_pose24" / f"{entry.clip_id}.npz"
+            )
+
+    seen: set[Path] = set()
+    for candidate in candidates:
+        candidate = candidate.expanduser().resolve()
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def load_source_pose24(
+    entry: ClipEntry,
+    source_pose_dir: Path | None,
+) -> SourcePose24 | None:
+    path = resolve_source_pose_path(entry, source_pose_dir)
+    if path is None:
+        return None
+    with np.load(path, allow_pickle=False) as payload:
+        required = ("body_names", "body_pos_w", "timestamps_s", "source_fps")
+        missing = [field for field in required if field not in payload]
+        if missing:
+            raise ValueError(
+                f"{path}: missing HumanPose24 fields: {', '.join(missing)}"
+            )
+        body_names = tuple(str(name) for name in payload["body_names"].tolist())
+        body_pos_w = np.asarray(payload["body_pos_w"], dtype=np.float32)
+        timestamps_s = np.asarray(payload["timestamps_s"], dtype=np.float64)
+        fps_values = np.asarray(payload["source_fps"]).reshape(-1)
+
+    if body_names != _HUMAN_POSE24_NAMES:
+        raise ValueError(
+            f"{path}: HumanPose24 body order mismatch: "
+            f"expected {_HUMAN_POSE24_NAMES}, got {body_names}"
+        )
+    if body_pos_w.ndim != 3 or body_pos_w.shape[1:] != (
+        len(_HUMAN_POSE24_NAMES),
+        3,
+    ):
+        raise ValueError(
+            f"{path}: body_pos_w must have shape (frames, 24, 3), "
+            f"got {body_pos_w.shape}"
+        )
+    if body_pos_w.shape[0] == 0:
+        raise ValueError(f"{path}: HumanPose24 contains no frames")
+    if timestamps_s.shape != (body_pos_w.shape[0],):
+        raise ValueError(
+            f"{path}: timestamps_s must have shape ({body_pos_w.shape[0]},), "
+            f"got {timestamps_s.shape}"
+        )
+    if fps_values.size != 1:
+        raise ValueError(
+            f"{path}: source_fps must contain one value, got {fps_values.shape}"
+        )
+    source_fps = float(fps_values[0])
+    if not math.isfinite(source_fps) or source_fps <= 0.0:
+        raise ValueError(f"{path}: invalid source_fps {source_fps}")
+    if not np.isfinite(body_pos_w).all():
+        raise ValueError(f"{path}: body_pos_w contains non-finite values")
+    if not np.isfinite(timestamps_s).all():
+        raise ValueError(f"{path}: timestamps_s contains non-finite values")
+    if timestamps_s.shape[0] > 1 and np.any(np.diff(timestamps_s) <= 0.0):
+        raise ValueError(f"{path}: timestamps_s must be strictly increasing")
+    return SourcePose24(
+        path=path,
+        body_pos_w=body_pos_w,
+        timestamps_s=timestamps_s,
+        source_fps=source_fps,
+    )
+
+
+def source_pose_arrays(
+    source_pose: SourcePose24,
+    time_s: float,
+    *,
+    recenter_root_xy: bool,
+    source_y_offset: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    timestamp = float(
+        np.clip(time_s, source_pose.timestamps_s[0], source_pose.timestamps_s[-1])
+    )
+    upper = int(np.searchsorted(source_pose.timestamps_s, timestamp, side="right"))
+    if upper == 0:
+        points = source_pose.body_pos_w[0].copy()
+    elif upper >= source_pose.frame_count:
+        points = source_pose.body_pos_w[-1].copy()
+    else:
+        lower = upper - 1
+        span = source_pose.timestamps_s[upper] - source_pose.timestamps_s[lower]
+        alpha = float((timestamp - source_pose.timestamps_s[lower]) / span)
+        points = (
+            (1.0 - alpha) * source_pose.body_pos_w[lower]
+            + alpha * source_pose.body_pos_w[upper]
+        ).astype(np.float32)
+
+    offset = np.zeros(3, dtype=np.float32)
+    if recenter_root_xy:
+        offset[:2] -= points[_HUMAN_POSE24_PELVIS_INDEX, :2]
+    offset[1] += float(source_y_offset)
+    points += offset
+    segments = np.asarray(
+        [[points[parent], points[child]] for parent, child in _HUMAN_POSE24_LINKS],
+        dtype=np.float32,
+    )
+    return points, segments
+
+
 def _validate_clip_arrays(
     path: Path,
     *,
@@ -356,6 +557,7 @@ def apply_clip_frame(
     *,
     joint_qpos_addresses: tuple[int, ...],
     joint_dof_addresses: tuple[int, ...],
+    recenter_root_xy: bool,
 ) -> int:
     frame = int(np.clip(frame_index, 0, clip.frame_count - 1))
     data.qpos[:] = model.qpos0
@@ -366,7 +568,13 @@ def apply_clip_frame(
         copy=True,
     )
     root_quaternion /= np.linalg.norm(root_quaternion)
-    data.qpos[:3] = clip.body_pos_w[frame, _BASE_BODY_INDEX]
+    root_position = clip.body_pos_w[frame, _BASE_BODY_INDEX].astype(
+        np.float64,
+        copy=True,
+    )
+    if recenter_root_xy:
+        root_position[:2] = 0.0
+    data.qpos[:3] = root_position
     data.qpos[3:7] = root_quaternion
     data.qpos[list(joint_qpos_addresses)] = clip.joint_pos[frame]
     data.qvel[list(joint_dof_addresses)] = clip.joint_vel[frame]
@@ -394,13 +602,13 @@ def body_overlay_arrays(
     body_links: tuple[tuple[int, int], ...],
     frame_index: int,
     *,
-    follow_root: bool,
+    recenter_root_xy: bool,
     overlay_y_offset: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     frame = int(np.clip(frame_index, 0, clip.frame_count - 1))
     offset = np.zeros(3, dtype=np.float32)
-    if follow_root:
-        offset -= clip.body_pos_w[frame, _BASE_BODY_INDEX]
+    if recenter_root_xy:
+        offset[:2] -= clip.body_pos_w[frame, _BASE_BODY_INDEX, :2]
     offset[1] += float(overlay_y_offset)
     points = clip.body_pos_w[frame, 1:].astype(np.float32, copy=True)
     points += offset
@@ -421,6 +629,10 @@ def body_overlay_arrays(
 
 def line_segment_colors(segment_count: int) -> np.ndarray:
     return np.tile(_LINE_COLOR[None, None, :], (segment_count, 2, 1))
+
+
+def source_line_segment_colors(segment_count: int) -> np.ndarray:
+    return np.tile(_SOURCE_LINE_COLOR[None, None, :], (segment_count, 2, 1))
 
 
 def print_catalog_summary(entries: tuple[ClipEntry, ...]) -> None:
@@ -471,16 +683,26 @@ def _clip_markdown(
     )
 
 
+def _source_status_text(source_pose: SourcePose24 | None) -> str:
+    if source_pose is None:
+        return "not found for this clip"
+    return f"loaded: {source_pose.frame_count} frames @ {source_pose.source_fps:g} Hz"
+
+
 def run_viewer(
     entries: tuple[ClipEntry, ...],
     *,
     model_file: Path,
+    source_pose_dir: Path | None,
     host: str,
     port: int,
     speed: float,
     start_index: int,
     start_paused: bool,
+    show_source: bool,
     show_reference: bool,
+    recenter_root_xy: bool,
+    source_y_offset: float,
     overlay_y_offset: float,
     run_seconds: float | None,
 ) -> None:
@@ -501,6 +723,8 @@ def run_viewer(
         )
     if run_seconds is not None and run_seconds <= 0.0:
         raise ValueError(f"--run-seconds must be positive, got {run_seconds}")
+    if not math.isfinite(source_y_offset):
+        raise ValueError(f"--source-y-offset must be finite, got {source_y_offset}")
     if not math.isfinite(overlay_y_offset):
         raise ValueError(f"--overlay-y-offset must be finite, got {overlay_y_offset}")
 
@@ -508,6 +732,10 @@ def run_viewer(
     validate_bumi_model(model)
     data = mujoco.MjData(model)
     initial_clip = load_tracking_clip(entries[start_index])
+    initial_source_pose = load_source_pose24(
+        entries[start_index],
+        source_pose_dir,
+    )
     qpos_addresses, dof_addresses = resolve_joint_addresses(
         model,
         initial_clip.joint_names,
@@ -517,6 +745,7 @@ def run_viewer(
         clip=initial_clip,
         joint_qpos_addresses=qpos_addresses,
         joint_dof_addresses=dof_addresses,
+        source_pose=initial_source_pose,
         paused=start_paused,
     )
     state_lock = threading.RLock()
@@ -531,6 +760,10 @@ def run_viewer(
         plane="xy",
     )
     scene = ViserMujocoScene(server, model, num_envs=1)
+    # mjviser camera tracking subtracts the tracked body's full XYZ position.
+    # That is inappropriate here because it moves the physical ground through
+    # the robot.  Root following is instead applied explicitly to XY only.
+    scene.camera_tracking_enabled = False
     body_links = build_body_links(model)
 
     apply_clip_frame(
@@ -540,12 +773,13 @@ def run_viewer(
         0,
         joint_qpos_addresses=state.joint_qpos_addresses,
         joint_dof_addresses=state.joint_dof_addresses,
+        recenter_root_xy=recenter_root_xy,
     )
     initial_points, initial_segments = body_overlay_arrays(
         state.clip,
         body_links,
         0,
-        follow_root=scene.camera_tracking_enabled,
+        recenter_root_xy=recenter_root_xy,
         overlay_y_offset=overlay_y_offset,
     )
     point_handle = server.scene.add_point_cloud(
@@ -569,14 +803,60 @@ def run_viewer(
         axes_radius=0.008,
         visible=show_reference,
     )
+    if initial_source_pose is None:
+        initial_source_points = np.zeros(
+            (len(_HUMAN_POSE24_NAMES), 3),
+            dtype=np.float32,
+        )
+        initial_source_segments = np.zeros(
+            (len(_HUMAN_POSE24_LINKS), 2, 3),
+            dtype=np.float32,
+        )
+    else:
+        initial_source_points, initial_source_segments = source_pose_arrays(
+            initial_source_pose,
+            0.0,
+            recenter_root_xy=recenter_root_xy,
+            source_y_offset=source_y_offset,
+        )
+    source_point_handle = server.scene.add_point_cloud(
+        "/source_smplx/joints",
+        points=initial_source_points,
+        colors=np.tile(
+            _SOURCE_POINT_COLOR[None, :],
+            (len(_HUMAN_POSE24_NAMES), 1),
+        ),
+        point_size=0.035,
+        point_shape="circle",
+        visible=show_source and initial_source_pose is not None,
+    )
+    source_line_handle = server.scene.add_line_segments(
+        "/source_smplx/bones",
+        points=initial_source_segments,
+        colors=source_line_segment_colors(len(_HUMAN_POSE24_LINKS)),
+        line_width=4.0,
+        visible=show_source and initial_source_pose is not None,
+    )
 
     labels = tuple(entry.label for entry in entries)
     index_by_label = {label: index for index, label in enumerate(labels)}
+
+    camera_look_at = np.asarray([0.0, 0.0, 0.5])
+    camera_position = camera_look_at + np.asarray([1.17, -2.03, 0.86])
+
+    @server.on_client_connect
+    def _set_initial_camera(client: Any) -> None:
+        client.camera.position = camera_position
+        client.camera.look_at = camera_look_at
+
     tabs = server.gui.add_tab_group()
     with tabs.add_tab("Playback"):
         server.gui.add_markdown(
-            "**Blue/orange:** body FK stored in the NPZ. "
-            "Set `Overlay Y offset` to 0 for exact mesh alignment."
+            "**Purple/green:** original SMPL-X FK source motion represented "
+            "by its 24 selected joints, before GMR/IK. **Blue/orange:** "
+            "optional final Bumi FK debug overlay. `Follow root XY` recenters "
+            "the SMPL-X pelvis and Bumi `base_link` independently in XY only; "
+            "both retain their original Z above the world ground."
         )
         clip_dropdown = server.gui.add_dropdown(
             "Clip",
@@ -608,9 +888,24 @@ def run_viewer(
             options=_END_BEHAVIORS,
             initial_value="Next clip",
         )
+        source_checkbox = server.gui.add_checkbox(
+            "Show source SMPL-X skeleton",
+            initial_value=show_source,
+        )
+        source_y_slider = server.gui.add_slider(
+            "Source SMPL-X Y offset",
+            min=-2.5,
+            max=2.5,
+            step=0.05,
+            initial_value=source_y_offset,
+        )
         reference_checkbox = server.gui.add_checkbox(
-            "Show stored body overlay",
+            "Show Bumi FK debug overlay",
             initial_value=show_reference,
+        )
+        follow_root_xy_checkbox = server.gui.add_checkbox(
+            "Follow root XY",
+            initial_value=recenter_root_xy,
         )
         overlay_y_slider = server.gui.add_slider(
             "Overlay Y offset",
@@ -624,13 +919,12 @@ def run_viewer(
             initial_value=initial_clip.entry.quality_group,
             disabled=True,
         )
-        clip_info = server.gui.add_markdown(_clip_markdown(state, entries))
-    with tabs.add_tab("Scene"):
-        scene.create_scene_gui(
-            camera_distance=2.5,
-            camera_azimuth=120.0,
-            camera_elevation=20.0,
+        source_status = server.gui.add_text(
+            "Source SMPL-X",
+            initial_value=_source_status_text(initial_source_pose),
+            disabled=True,
         )
+        clip_info = server.gui.add_markdown(_clip_markdown(state, entries))
     with tabs.add_tab("Visualization"):
         scene.create_overlay_gui()
     with tabs.add_tab("Groups"):
@@ -645,19 +939,40 @@ def run_viewer(
                 frame_index,
                 joint_qpos_addresses=state.joint_qpos_addresses,
                 joint_dof_addresses=state.joint_dof_addresses,
+                recenter_root_xy=bool(follow_root_xy_checkbox.value),
             )
             scene.update_from_mjdata(data)
             points, segments = body_overlay_arrays(
                 state.clip,
                 body_links,
                 state.frame,
-                follow_root=scene.camera_tracking_enabled,
+                recenter_root_xy=bool(follow_root_xy_checkbox.value),
                 overlay_y_offset=float(overlay_y_slider.value),
             )
             offset = np.zeros(3, dtype=np.float32)
-            if scene.camera_tracking_enabled:
-                offset -= state.clip.body_pos_w[state.frame, _BASE_BODY_INDEX]
+            if follow_root_xy_checkbox.value:
+                offset[:2] -= state.clip.body_pos_w[
+                    state.frame,
+                    _BASE_BODY_INDEX,
+                    :2,
+                ]
             offset[1] += float(overlay_y_slider.value)
+            if state.source_pose is None:
+                source_points = np.zeros(
+                    (len(_HUMAN_POSE24_NAMES), 3),
+                    dtype=np.float32,
+                )
+                source_segments = np.zeros(
+                    (len(_HUMAN_POSE24_LINKS), 2, 3),
+                    dtype=np.float32,
+                )
+            else:
+                source_points, source_segments = source_pose_arrays(
+                    state.source_pose,
+                    state.frame / state.clip.fps,
+                    recenter_root_xy=bool(follow_root_xy_checkbox.value),
+                    source_y_offset=float(source_y_slider.value),
+                )
             with server.atomic():
                 point_handle.points = points
                 line_handle.points = segments
@@ -668,6 +983,13 @@ def run_viewer(
                     state.frame,
                     _BASE_BODY_INDEX,
                 ]
+                source_point_handle.points = source_points
+                source_line_handle.points = source_segments
+                source_visible = (
+                    bool(source_checkbox.value) and state.source_pose is not None
+                )
+                source_point_handle.visible = source_visible
+                source_line_handle.visible = source_visible
                 if int(frame_slider.value) != state.frame:
                     frame_slider.value = state.frame
 
@@ -675,14 +997,17 @@ def run_viewer(
         with state_lock:
             index %= len(entries)
             clip = load_tracking_clip(entries[index])
+            source_pose = load_source_pose24(entries[index], source_pose_dir)
             qpos, dof = resolve_joint_addresses(model, clip.joint_names)
             state.clip_index = index
             state.clip = clip
             state.joint_qpos_addresses = qpos
             state.joint_dof_addresses = dof
+            state.source_pose = source_pose
             state.frame = 0
             frame_slider.max = clip.frame_count - 1
             quality_text.value = clip.entry.quality_group
+            source_status.value = _source_status_text(source_pose)
             clip_info.content = _clip_markdown(state, entries)
             if sync_dropdown and clip_dropdown.value != entries[index].label:
                 clip_dropdown.value = entries[index].label
@@ -759,8 +1084,28 @@ def run_viewer(
             line_handle.visible = visible
             root_frame.visible = visible
 
+    @source_checkbox.on_update
+    def _on_source_update(event: Any) -> None:
+        del event
+        with server.atomic():
+            visible = bool(source_checkbox.value) and state.source_pose is not None
+            source_point_handle.visible = visible
+            source_line_handle.visible = visible
+
+    @source_y_slider.on_update
+    def _on_source_offset_update(event: Any) -> None:
+        del event
+        with state_lock:
+            render_frame(state.frame)
+
     @overlay_y_slider.on_update
     def _on_overlay_offset_update(event: Any) -> None:
+        del event
+        with state_lock:
+            render_frame(state.frame)
+
+    @follow_root_xy_checkbox.on_update
+    def _on_follow_root_xy_update(event: Any) -> None:
         del event
         with state_lock:
             render_frame(state.frame)
@@ -822,6 +1167,15 @@ def parse_args() -> argparse.Namespace:
         help="Bumi MJCF used to render FK meshes",
     )
     parser.add_argument(
+        "--source-pose-dir",
+        type=Path,
+        default=None,
+        help=(
+            "HumanPose24 NPZ directory (or one NPZ); by default infer the "
+            "human_pose24 sibling of tracker_50hz"
+        ),
+    )
+    parser.add_argument(
         "--quality-report",
         type=Path,
         default=None,
@@ -864,7 +1218,27 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--hide-reference",
         action="store_true",
-        help="Initially hide stored body points/links over the MuJoCo mesh",
+        help="Initially hide the final Bumi FK debug overlay",
+    )
+    parser.add_argument(
+        "--hide-source",
+        action="store_true",
+        help="Initially hide the original SMPL-X/HumanPose24 source skeleton",
+    )
+    parser.add_argument(
+        "--recenter-root-xy",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Recenter base_link XY for display while retaining its world Z; "
+            "disable to show the original world trajectory"
+        ),
+    )
+    parser.add_argument(
+        "--source-y-offset",
+        type=float,
+        default=_DEFAULT_SOURCE_Y_OFFSET,
+        help="Initial lateral offset for the source SMPL-X 24-joint skeleton",
     )
     parser.add_argument(
         "--overlay-y-offset",
@@ -913,12 +1287,16 @@ def main() -> None:
     run_viewer(
         entries,
         model_file=model_file,
+        source_pose_dir=args.source_pose_dir,
         host=str(args.host),
         port=int(args.port),
         speed=float(args.speed),
         start_index=int(args.start_index),
         start_paused=bool(args.start_paused),
+        show_source=not bool(args.hide_source),
         show_reference=not bool(args.hide_reference),
+        recenter_root_xy=bool(args.recenter_root_xy),
+        source_y_offset=float(args.source_y_offset),
         overlay_y_offset=float(args.overlay_y_offset),
         run_seconds=args.run_seconds,
     )

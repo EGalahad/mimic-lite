@@ -51,6 +51,21 @@ def _write_motion(path: Path, *, frames: int = 3) -> None:
     )
 
 
+def _write_source_pose(path: Path) -> None:
+    body_pos = np.zeros((2, 24, 3), dtype=np.float32)
+    body_pos[0, 0] = np.asarray([1.0, 2.0, 0.8])
+    body_pos[1, 0] = np.asarray([3.0, 4.0, 1.0])
+    body_pos[0, 1] = np.asarray([1.1, 2.0, 0.7])
+    body_pos[1, 1] = np.asarray([3.3, 4.0, 0.9])
+    np.savez_compressed(
+        path,
+        body_names=np.asarray(MODULE._HUMAN_POSE24_NAMES),
+        body_pos_w=body_pos,
+        timestamps_s=np.asarray([0.0, 0.1], dtype=np.float64),
+        source_fps=np.asarray([10.0], dtype=np.float64),
+    )
+
+
 def _minimal_bumi_joint_model() -> mujoco.MjModel:
     nested_bodies = "".join(
         (
@@ -156,6 +171,7 @@ class BumiRetargetViserTest(unittest.TestCase):
                 1,
                 joint_qpos_addresses=qpos,
                 joint_dof_addresses=dof,
+                recenter_root_xy=False,
             )
 
             np.testing.assert_allclose(data.qpos[:3], [1.0, 2.0, 0.8])
@@ -165,6 +181,18 @@ class BumiRetargetViserTest(unittest.TestCase):
                     float(data.qpos[address]),
                     float(clip.joint_pos[1, index]),
                 )
+
+            MODULE.apply_clip_frame(
+                model,
+                data,
+                clip,
+                1,
+                joint_qpos_addresses=qpos,
+                joint_dof_addresses=dof,
+                recenter_root_xy=True,
+            )
+
+            np.testing.assert_allclose(data.qpos[:3], [0.0, 0.0, 0.8])
 
     def test_recursive_staging_clip_id_uses_parent_name(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -183,7 +211,7 @@ class BumiRetargetViserTest(unittest.TestCase):
             self.assertEqual(entries[0].clip_id, "clip_id")
             self.assertEqual(entries[0].label, "clip_id/motion.npz")
 
-    def test_body_overlay_can_be_shown_beside_followed_mesh(self) -> None:
+    def test_body_overlay_recenters_xy_but_retains_world_z(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "clip.npz"
             _write_motion(path, frames=1)
@@ -199,12 +227,44 @@ class BumiRetargetViserTest(unittest.TestCase):
                 clip,
                 (),
                 0,
-                follow_root=True,
+                recenter_root_xy=True,
                 overlay_y_offset=0.6,
             )
 
-            np.testing.assert_allclose(points[0], [0.0, 0.6, 0.0])
+            np.testing.assert_allclose(points[0], [0.0, 0.6, 0.5])
             self.assertEqual(segments.shape, (0, 2, 3))
+
+    def test_source_smplx_pose_is_inferred_and_sampled_by_timestamp(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            split = Path(temporary)
+            tracker_dir = split / "tracker_50hz"
+            source_dir = split / "human_pose24"
+            tracker_dir.mkdir()
+            source_dir.mkdir()
+            tracker_path = tracker_dir / "clip.npz"
+            _write_motion(tracker_path)
+            _write_source_pose(source_dir / "clip.npz")
+            entry = MODULE.ClipEntry(
+                path=tracker_path,
+                label=tracker_path.name,
+                clip_id=tracker_path.stem,
+                quality_group="automatic",
+            )
+
+            source = MODULE.load_source_pose24(entry, None)
+
+            self.assertIsNotNone(source)
+            assert source is not None
+            self.assertEqual(source.frame_count, 2)
+            points, segments = MODULE.source_pose_arrays(
+                source,
+                0.05,
+                recenter_root_xy=True,
+                source_y_offset=-1.0,
+            )
+            np.testing.assert_allclose(points[0], [0.0, -1.0, 0.9])
+            np.testing.assert_allclose(points[1], [0.2, -1.0, 0.8], atol=1.0e-6)
+            np.testing.assert_allclose(segments[0], [points[0], points[1]])
 
 
 if __name__ == "__main__":

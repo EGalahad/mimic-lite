@@ -293,10 +293,14 @@ candidate mixture samples AMASS at 0.8 and the original 36 gait clips at 0.2.
 
 ##### Browse the retargeted motions with Viser
 
-The batch viewer lazily loads only the selected NPZ, renders the Bumi MuJoCo
-mesh, and overlays the body positions stored by the tracker exporter. By
-default it opens the full production train catalog and infers its quality
-report:
+The batch viewer lazily loads only the selected clip and renders three
+synchronized views: the Bumi MuJoCo mesh, the original SMPL-X FK source motion
+as its 24 selected joints (purple/green), and an optional final Bumi FK debug
+overlay (blue/orange). The 24 source positions are saved before GMR/IK and are
+sampled for display by timestamp, so no 30 Hz assumption or frame-index
+matching is introduced. By default the viewer opens the full production train
+catalog and infers both its quality report and the sibling `human_pose24`
+directory:
 
 ```bash
 PYTHONPATH=projects/mimic-lite \
@@ -307,9 +311,14 @@ uv --project venv/mjlab run --with mjviser==0.0.14 \
 Open `http://localhost:8090`. The GUI provides clip selection, previous/next,
 play/pause, frame stepping, speed, body-overlay visibility, and an end behavior
 that defaults to automatically advancing through the catalog. `Playback` is the
-default tab. The stored blue/orange FK skeleton starts 0.6 m beside the MuJoCo
-mesh so both are visible; set `Overlay Y offset` to 0 to check exact alignment.
-To inspect a review split or held-out motions:
+default tab. `Follow root XY` recenters the source SMPL-X pelvis and Bumi
+`base_link` independently in the horizontal plane for visualization only. It
+does not remove either root Z, so the world ground remains at Z=0 and vertical
+motion is preserved. Disable it (or start with `--no-recenter-root-xy`) to view
+the original world trajectories. The source skeleton starts at Y=-1.0 m and
+the blue/orange Bumi FK debug skeleton at Y=+0.6 m; their offsets can be changed
+in the GUI. Set the Bumi `Overlay Y offset` to 0 to check exact mesh/FK
+alignment. To inspect a review split or held-out motions:
 
 ```bash
 # Only clips held for geometry review.
