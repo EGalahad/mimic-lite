@@ -18,6 +18,7 @@ from uuid import uuid4
 import numpy as np
 
 from mimic_lite_conversion.bumi import (
+    BUMI_JOINT_POSITION_LIMITS,
     BUMI_V1_TRAINING_MAX_BODY_ANGULAR_VELOCITY_NORM,
     BUMI_V1_TRAINING_MAX_BODY_LINEAR_VELOCITY_NORM,
     BUMI_V1_TRAINING_MAX_JOINT_VELOCITY_ABS,
@@ -137,6 +138,29 @@ def validate_motion(path: Path) -> MotionStats:
 
     joint_pos_abs = np.abs(arrays["joint_pos"])
     joint_vel_abs = np.abs(arrays["joint_vel"])
+    joint_position_lower = np.asarray(
+        [BUMI_JOINT_POSITION_LIMITS[name][0] for name in BUMI_MOTION_JOINT_NAMES]
+    )
+    joint_position_upper = np.asarray(
+        [BUMI_JOINT_POSITION_LIMITS[name][1] for name in BUMI_MOTION_JOINT_NAMES]
+    )
+    joint_position_violation = np.maximum(
+        joint_position_lower[None, :] - arrays["joint_pos"],
+        arrays["joint_pos"] - joint_position_upper[None, :],
+    )
+    max_position_violation = float(joint_position_violation.max(initial=0.0))
+    if max_position_violation > 1.0e-5:
+        flat_index = int(np.argmax(joint_position_violation))
+        _, joint_index = np.unravel_index(
+            flat_index,
+            joint_position_violation.shape,
+        )
+        joint_name = BUMI_MOTION_JOINT_NAMES[joint_index]
+        raise ValueError(
+            f"{path.name}: {joint_name} exceeds position limit "
+            f"{BUMI_JOINT_POSITION_LIMITS[joint_name]} "
+            f"(max violation={max_position_violation:g})"
+        )
     body_pos_z = arrays["body_pos_w"][..., 2]
     body_lin_vel_norm = np.linalg.norm(arrays["body_lin_vel_w"], axis=-1)
     body_ang_vel_norm = np.linalg.norm(arrays["body_ang_vel_w"], axis=-1)
@@ -149,7 +173,6 @@ def validate_motion(path: Path) -> MotionStats:
     )
 
     checks = (
-        ("joint_pos abs", joint_pos_abs, 3.0),
         (
             "joint_vel abs",
             joint_vel_abs,

@@ -18,6 +18,7 @@ from mimic_lite_conversion.amass_gmr import (
     write_json,
 )
 from mimic_lite_conversion.bumi import (
+    BUMI_JOINT_POSITION_LIMITS,
     BUMI_JOINT_VELOCITY_LIMITS,
     BUMI_MOTION_BODY_NAMES,
     BUMI_MOTION_JOINT_NAMES,
@@ -29,6 +30,7 @@ from mimic_lite_conversion.bumi import (
 
 def _tracker_quality(path: Path) -> dict[str, float]:
     with np.load(path, allow_pickle=False) as payload:
+        joint_pos = np.asarray(payload["joint_pos"], dtype=np.float64)
         joint_vel = np.asarray(payload["joint_vel"], dtype=np.float64)
         body_pos = np.asarray(payload["body_pos_w"], dtype=np.float64)
         body_quat = np.asarray(payload["body_quat_w"], dtype=np.float64)
@@ -39,6 +41,18 @@ def _tracker_quality(path: Path) -> dict[str, float]:
         dtype=np.float64,
     )
     velocity_ratio = np.abs(joint_vel) / velocity_limits[None, :]
+    position_lower = np.asarray(
+        [BUMI_JOINT_POSITION_LIMITS[name][0] for name in BUMI_MOTION_JOINT_NAMES],
+        dtype=np.float64,
+    )
+    position_upper = np.asarray(
+        [BUMI_JOINT_POSITION_LIMITS[name][1] for name in BUMI_MOTION_JOINT_NAMES],
+        dtype=np.float64,
+    )
+    position_violation = np.maximum(
+        position_lower[None, :] - joint_pos,
+        joint_pos - position_upper[None, :],
+    )
     quaternion_norm_error = np.abs(np.linalg.norm(body_quat, axis=-1) - 1.0)
     if body_pos.shape[0] > 1:
         max_body_step_m = float(
@@ -65,6 +79,9 @@ def _tracker_quality(path: Path) -> dict[str, float]:
         np.linalg.norm(body_quat[:, 0] + identity, axis=-1),
     )
     return {
+        "max_joint_position_limit_violation": float(
+            position_violation.max(initial=0.0)
+        ),
         "max_joint_velocity_abs": float(np.abs(joint_vel).max(initial=0.0)),
         "max_joint_velocity_ratio": float(velocity_ratio.max(initial=0.0)),
         "max_body_linear_velocity_norm": float(
@@ -176,6 +193,10 @@ def build_report(
         (record["max_joint_velocity_ratio"] for record in records),
         default=0.0,
     )
+    max_position_violation = max(
+        (record["max_joint_position_limit_violation"] for record in records),
+        default=0.0,
+    )
     max_native_velocity_ratio = max(
         (
             record.get(
@@ -207,6 +228,7 @@ def build_report(
         and not rejects
         and not missing_ids
         and not stale_metadata_clip_ids
+        and max_position_violation <= 1.0e-5
         and max_velocity_ratio <= 1.05
         and max_native_velocity_ratio <= 1.05
         and max_quaternion_error < 1.0e-5
@@ -234,7 +256,8 @@ def build_report(
             record["max_motion_root_ang_vel_abs"],
         )
         return bool(
-            record["max_joint_velocity_ratio"] <= 1.05
+            record["max_joint_position_limit_violation"] <= 1.0e-5
+            and record["max_joint_velocity_ratio"] <= 1.05
             and record.get(
                 "max_native_joint_velocity_ratio",
                 record["max_joint_velocity_ratio"],
@@ -283,6 +306,7 @@ def build_report(
             sorted(Counter(f"{record['source_fps']:g}" for record in records).items())
         ),
         "gate_failures": gate_failures,
+        "max_joint_position_limit_violation": max_position_violation,
         "max_joint_velocity_ratio": max_velocity_ratio,
         "max_native_joint_velocity_ratio": max_native_velocity_ratio,
         "max_joint_velocity_abs": max(

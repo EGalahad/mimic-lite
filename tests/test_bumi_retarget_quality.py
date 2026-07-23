@@ -41,6 +41,7 @@ class BumiRetargetQualityTest(unittest.TestCase):
         joint_vel[:, joint_index] = joint_velocity
         np.savez_compressed(
             tracker,
+            joint_pos=np.zeros((3, 21), dtype=np.float32),
             joint_vel=joint_vel,
             body_pos_w=np.zeros((3, 23, 3), dtype=np.float32),
             body_quat_w=body_quat,

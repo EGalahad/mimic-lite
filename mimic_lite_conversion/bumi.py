@@ -111,6 +111,30 @@ BUMI_JOINT_VELOCITY_LIMITS = {
     name: _joint_velocity_limit(name) for name in BUMI_POLICY_JOINT_NAMES
 }
 
+BUMI_JOINT_POSITION_LIMITS = {
+    "waist_yaw_joint": (-1.57, 1.57),
+    "l_arm_pitch_joint": (-3.14, 1.57),
+    "l_arm_roll_joint": (-0.14, 1.94),
+    "l_arm_yaw_joint": (-1.57, 1.57),
+    "l_elbow_pitch_joint": (-2.26, 0.0),
+    "r_arm_pitch_joint": (-3.14, 1.57),
+    "r_arm_roll_joint": (-1.94, 0.14),
+    "r_arm_yaw_joint": (-1.57, 1.57),
+    "r_elbow_pitch_joint": (-2.26, 0.0),
+    "l_leg_pitch_joint": (-2.09, 2.09),
+    "l_leg_roll_joint": (-0.66, 1.57),
+    "l_leg_yaw_joint": (-2.53, 2.53),
+    "l_knee_pitch_joint": (0.0, 2.24),
+    "l_ankle_pitch_joint": (-0.96, 0.44),
+    "l_ankle_roll_joint": (-0.17, 0.17),
+    "r_leg_pitch_joint": (-2.09, 2.09),
+    "r_leg_roll_joint": (-1.57, 0.66),
+    "r_leg_yaw_joint": (-2.53, 2.53),
+    "r_knee_pitch_joint": (0.0, 2.24),
+    "r_ankle_pitch_joint": (-0.96, 0.44),
+    "r_ankle_roll_joint": (-0.17, 0.17),
+}
+
 BUMI_NOMINAL_JOINT_POS = {
     "l_arm_roll_joint": 0.3,
     "r_arm_roll_joint": -0.3,
@@ -156,6 +180,23 @@ def validate_bumi_model(model: mujoco.MjModel) -> None:
             "Bumi model joint order mismatch: "
             f"expected {BUMI_POLICY_JOINT_NAMES}, got {tuple(model_joint_names)}"
         )
+    for joint_name in BUMI_POLICY_JOINT_NAMES:
+        joint_id = mujoco.mj_name2id(
+            model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            joint_name,
+        )
+        if not np.allclose(
+            model.jnt_range[joint_id],
+            BUMI_JOINT_POSITION_LIMITS[joint_name],
+            atol=1.0e-12,
+            rtol=0.0,
+        ):
+            raise ValueError(
+                f"Bumi position limit mismatch for {joint_name}: "
+                f"{model.jnt_range[joint_id]} / "
+                f"{BUMI_JOINT_POSITION_LIMITS[joint_name]}"
+            )
     model_body_names = tuple(
         str(mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_BODY, body_id))
         for body_id in range(1, model.nbody)

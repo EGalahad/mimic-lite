@@ -124,6 +124,24 @@ class BumiMotionDatasetTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "quat"):
                 MODULE.validate_motion(path)
 
+    def test_joint_positions_use_per_joint_mjcf_limits(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / "position_limits.npz"
+            _write_motion(path)
+            with np.load(path) as payload:
+                arrays = {key: payload[key] for key in payload.files}
+            arrays["joint_pos"] = arrays["joint_pos"].copy()
+            # l_arm_pitch allows [-3.14, 1.57], so a valid value below the old
+            # blanket -3 rad limit must pass.
+            arrays["joint_pos"][0, 5] = -3.1
+            np.savez_compressed(path, **arrays)
+            MODULE.validate_motion(path)
+
+            arrays["joint_pos"][0, 5] = -3.15
+            np.savez_compressed(path, **arrays)
+            with self.assertRaisesRegex(ValueError, "l_arm_pitch_joint"):
+                MODULE.validate_motion(path)
+
     def test_different_output_requires_force(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
