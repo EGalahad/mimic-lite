@@ -183,6 +183,29 @@ class BumiRetargetViserTest(unittest.TestCase):
             self.assertEqual(entries[0].clip_id, "clip_id")
             self.assertEqual(entries[0].label, "clip_id/motion.npz")
 
+    def test_body_overlay_can_be_shown_beside_followed_mesh(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "clip.npz"
+            _write_motion(path, frames=1)
+            entry = MODULE.ClipEntry(
+                path=path,
+                label=path.name,
+                clip_id=path.stem,
+                quality_group="automatic",
+            )
+            clip = MODULE.load_tracking_clip(entry)
+
+            points, segments = MODULE.body_overlay_arrays(
+                clip,
+                (),
+                0,
+                follow_root=True,
+                overlay_y_offset=0.6,
+            )
+
+            np.testing.assert_allclose(points[0], [0.0, 0.6, 0.0])
+            self.assertEqual(segments.shape, (0, 2, 3))
+
 
 if __name__ == "__main__":
     unittest.main()

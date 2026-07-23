@@ -34,6 +34,7 @@ from mimic_lite_conversion.bumi import (
 _BASE_BODY_INDEX = BUMI_MOTION_BODY_NAMES.index("base_link")
 _POINT_COLOR = np.asarray([40, 180, 255], dtype=np.uint8)
 _LINE_COLOR = np.asarray([255, 186, 73], dtype=np.uint8)
+_DEFAULT_OVERLAY_Y_OFFSET = 0.6
 _QUALITY_REPORT_FIELDS = {
     "automatic": "automatic_training_ready_clip_ids",
     "geometry_review": "geometry_review_clip_ids",
@@ -394,13 +395,13 @@ def body_overlay_arrays(
     frame_index: int,
     *,
     follow_root: bool,
+    overlay_y_offset: float,
 ) -> tuple[np.ndarray, np.ndarray]:
     frame = int(np.clip(frame_index, 0, clip.frame_count - 1))
-    offset = (
-        -clip.body_pos_w[frame, _BASE_BODY_INDEX]
-        if follow_root
-        else np.zeros(3, dtype=np.float32)
-    )
+    offset = np.zeros(3, dtype=np.float32)
+    if follow_root:
+        offset -= clip.body_pos_w[frame, _BASE_BODY_INDEX]
+    offset[1] += float(overlay_y_offset)
     points = clip.body_pos_w[frame, 1:].astype(np.float32, copy=True)
     points += offset
     segments = np.asarray(
@@ -480,6 +481,7 @@ def run_viewer(
     start_index: int,
     start_paused: bool,
     show_reference: bool,
+    overlay_y_offset: float,
     run_seconds: float | None,
 ) -> None:
     try:
@@ -499,6 +501,8 @@ def run_viewer(
         )
     if run_seconds is not None and run_seconds <= 0.0:
         raise ValueError(f"--run-seconds must be positive, got {run_seconds}")
+    if not math.isfinite(overlay_y_offset):
+        raise ValueError(f"--overlay-y-offset must be finite, got {overlay_y_offset}")
 
     model = mujoco.MjModel.from_xml_path(model_file.as_posix())
     validate_bumi_model(model)
@@ -542,6 +546,7 @@ def run_viewer(
         body_links,
         0,
         follow_root=scene.camera_tracking_enabled,
+        overlay_y_offset=overlay_y_offset,
     )
     point_handle = server.scene.add_point_cloud(
         "/reference/body_points",
@@ -567,7 +572,12 @@ def run_viewer(
 
     labels = tuple(entry.label for entry in entries)
     index_by_label = {label: index for index, label in enumerate(labels)}
-    with server.gui.add_folder("Batch playback"):
+    tabs = server.gui.add_tab_group()
+    with tabs.add_tab("Playback"):
+        server.gui.add_markdown(
+            "**Blue/orange:** body FK stored in the NPZ. "
+            "Set `Overlay Y offset` to 0 for exact mesh alignment."
+        )
         clip_dropdown = server.gui.add_dropdown(
             "Clip",
             options=labels,
@@ -596,18 +606,35 @@ def run_viewer(
         end_dropdown = server.gui.add_dropdown(
             "At clip end",
             options=_END_BEHAVIORS,
-            initial_value="Loop current",
+            initial_value="Next clip",
         )
         reference_checkbox = server.gui.add_checkbox(
             "Show stored body overlay",
             initial_value=show_reference,
         )
+        overlay_y_slider = server.gui.add_slider(
+            "Overlay Y offset",
+            min=-1.5,
+            max=1.5,
+            step=0.05,
+            initial_value=overlay_y_offset,
+        )
+        quality_text = server.gui.add_text(
+            "Quality group",
+            initial_value=initial_clip.entry.quality_group,
+            disabled=True,
+        )
         clip_info = server.gui.add_markdown(_clip_markdown(state, entries))
-    scene.create_visualization_gui(
-        camera_distance=2.5,
-        camera_azimuth=120.0,
-        camera_elevation=20.0,
-    )
+    with tabs.add_tab("Scene"):
+        scene.create_scene_gui(
+            camera_distance=2.5,
+            camera_azimuth=120.0,
+            camera_elevation=20.0,
+        )
+    with tabs.add_tab("Visualization"):
+        scene.create_overlay_gui()
+    with tabs.add_tab("Groups"):
+        scene.create_groups_gui()
 
     def render_frame(frame_index: int) -> None:
         with state_lock:
@@ -625,12 +652,12 @@ def run_viewer(
                 body_links,
                 state.frame,
                 follow_root=scene.camera_tracking_enabled,
+                overlay_y_offset=float(overlay_y_slider.value),
             )
-            offset = (
-                -state.clip.body_pos_w[state.frame, _BASE_BODY_INDEX]
-                if scene.camera_tracking_enabled
-                else np.zeros(3, dtype=np.float32)
-            )
+            offset = np.zeros(3, dtype=np.float32)
+            if scene.camera_tracking_enabled:
+                offset -= state.clip.body_pos_w[state.frame, _BASE_BODY_INDEX]
+            offset[1] += float(overlay_y_slider.value)
             with server.atomic():
                 point_handle.points = points
                 line_handle.points = segments
@@ -655,6 +682,7 @@ def run_viewer(
             state.joint_dof_addresses = dof
             state.frame = 0
             frame_slider.max = clip.frame_count - 1
+            quality_text.value = clip.entry.quality_group
             clip_info.content = _clip_markdown(state, entries)
             if sync_dropdown and clip_dropdown.value != entries[index].label:
                 clip_dropdown.value = entries[index].label
@@ -730,6 +758,12 @@ def run_viewer(
             point_handle.visible = visible
             line_handle.visible = visible
             root_frame.visible = visible
+
+    @overlay_y_slider.on_update
+    def _on_overlay_offset_update(event: Any) -> None:
+        del event
+        with state_lock:
+            render_frame(state.frame)
 
     actual_port = server.get_port()
     browser_host = "localhost" if host in {"0.0.0.0", "127.0.0.1"} else host
@@ -833,6 +867,15 @@ def parse_args() -> argparse.Namespace:
         help="Initially hide stored body points/links over the MuJoCo mesh",
     )
     parser.add_argument(
+        "--overlay-y-offset",
+        type=float,
+        default=_DEFAULT_OVERLAY_Y_OFFSET,
+        help=(
+            "Initial lateral offset for the stored FK skeleton; use 0 for "
+            "exact mesh alignment"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate every selected NPZ and exit without importing Viser",
@@ -876,6 +919,7 @@ def main() -> None:
         start_index=int(args.start_index),
         start_paused=bool(args.start_paused),
         show_reference=not bool(args.hide_reference),
+        overlay_y_offset=float(args.overlay_y_offset),
         run_seconds=args.run_seconds,
     )
 

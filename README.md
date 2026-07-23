@@ -306,8 +306,10 @@ uv --project venv/mjlab run --with mjviser==0.0.14 \
 
 Open `http://localhost:8090`. The GUI provides clip selection, previous/next,
 play/pause, frame stepping, speed, body-overlay visibility, and an end behavior
-that can automatically advance through the catalog. To inspect a review split
-or held-out motions:
+that defaults to automatically advancing through the catalog. `Playback` is the
+default tab. The stored blue/orange FK skeleton starts 0.6 m beside the MuJoCo
+mesh so both are visible; set `Overlay Y offset` to 0 to check exact alignment.
+To inspect a review split or held-out motions:
 
 ```bash
 # Only clips held for geometry review.
