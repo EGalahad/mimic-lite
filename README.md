@@ -222,12 +222,76 @@ and the `motion_root` contract is exact. The conservative automatic split has
 review. A 16-env, one-update PPO smoke on the 14 automatic clips completes
 without NaNs.
 
-For production, repeat conversion and reporting independently for `train.jsonl`
-and `val.jsonl`, and always stage with `--quality-report`; this prevents review
-clips from silently entering training. Stage the accepted train/val outputs as
-`amass_gmr_train` and `amass_gmr_val`. The candidate mixture samples AMASS at
-0.8 and the original 36 gait clips at 0.2. Its formal single-GPU run starts
-from random weights and keeps the Bumi actuator delay/randomization enabled:
+The full train and held-out conversion has also completed. Each worker owns an
+independent GMR/model instance, so causal warm-start state never crosses clip
+boundaries. `--resume` validates provenance before reusing an output:
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python projects/mimic-lite/scripts/convert_amass_to_bumi_tracker.py \
+  --manifest "$RETARGET_ROOT/manifests/train.jsonl" \
+  --smplx-model-dir "$SMPLX_MODEL_DIR" \
+  --gmr-root "$GMR_ROOT" --bumi-mjcf "$BUMI_MJCF" \
+  --actual-human-height 1.6 --target-fps 50 \
+  --output "$RETARGET_ROOT/train" \
+  --workers 16 --torch-threads-per-worker 2 \
+  --resume --fail-on-reject
+
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python projects/mimic-lite/scripts/convert_amass_to_bumi_tracker.py \
+  --manifest "$RETARGET_ROOT/manifests/val.jsonl" \
+  --smplx-model-dir "$SMPLX_MODEL_DIR" \
+  --gmr-root "$GMR_ROOT" --bumi-mjcf "$BUMI_MJCF" \
+  --actual-human-height 1.6 --target-fps 50 \
+  --output "$RETARGET_ROOT/val" \
+  --workers 2 --torch-threads-per-worker 2 \
+  --resume --fail-on-reject
+
+for split in train val; do
+  PYTHONPATH=projects/mimic-lite \
+  uv --project venv/mjlab run python \
+    projects/mimic-lite/scripts/report_bumi_retarget_quality.py \
+    --conversion-root "$RETARGET_ROOT/$split" \
+    --manifest "$RETARGET_ROOT/manifests/$split.jsonl"
+
+  PYTHONPATH=projects/mimic-lite \
+  uv --project venv/mjlab run python \
+    projects/mimic-lite/scripts/prepare_bumi_motion_dataset.py \
+    --source "$RETARGET_ROOT/$split/tracker_50hz" \
+    --quality-report "$RETARGET_ROOT/$split/reports/quality_summary.json" \
+    --output ".cache/mimic-lite/motions/bumi/amass_gmr_$split" \
+    --report-json "$RETARGET_ROOT/$split/reports/staging_summary.json" \
+    --link-mode symlink --force
+done
+```
+
+All 1,983 clips were converted, not only the clips admitted by the conservative
+training gate:
+
+- train: 1,787/1,787 clips, 3,188,842 native frames → 1,513,690 tracker frames;
+- val: 196/196 clips, 262,893 native frames → 116,844 tracker frames;
+- total: 1,983/1,983 clips and 1,630,534 final 50 Hz frames, with zero
+  conversion rejects, missing clips, stale metadata, or train/val overlap.
+
+The raw HumanPose24, native GMR qpos, final tracker NPZ, metadata, and review
+sets remain under `$RETARGET_ROOT/{train,val}`. The default staging deliberately
+contains only `automatic_training_ready_clip_ids`: train has 1,029 clips /
+774,163 frames and val has 121 clips / 80,738 frames. The remaining 436
+geometry-review + 322 dynamics-review train clips and 38 + 37 val clips are
+retained for replay/review rather than silently discarded or automatically
+trained.
+
+AMASS-only, held-out val, and the AMASS + original 36-gait mixture have each
+completed a 16-env, one-update GPU smoke on these production files. The
+candidate mixture samples AMASS at 0.8 and the original 36 gait clips at 0.2.
+Its formal single-GPU run starts from random weights and keeps the Bumi actuator
+delay/randomization enabled:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \

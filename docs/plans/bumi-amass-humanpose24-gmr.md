@@ -1,8 +1,8 @@
 # Bumi AMASS → HumanPose24 → GMR 数据与从头训练计划
 
-状态：v1 已完成三条 fixture、30 条真实 AMASS pilot、质量分流和 14 条自动通过数据的
-16-env PPO smoke；production 扩批、正式 4,000-iteration 训练与真实 Pico corruption
-仍待执行
+状态：v1 已完成三条 fixture、30 条 pilot、AMASS 全量 1,983 条转换、production
+质量分流/staging，以及 AMASS-only、AMASS+36 gait、held-out val 三个 16-env PPO
+smoke；正式 4,000-iteration 训练、随机 replay 抽检与真实 Pico corruption 仍待执行
 
 日期：2026-07-23
 
@@ -492,6 +492,28 @@ joint/body names 不塞进每个 NPZ，继续由 `meta.json` 提供；同时在 
 14/30 不是保留率目标，只是这个覆盖性 pilot 在当前保守 gate 下的实测结果。扩到
 production 后继续保存 review 集；不能为提高保留率而事后放松阈值。
 
+#### 6.2.2 已执行的 production 全量转换（2026-07-23）
+
+- manifest：train 1,787 clips，val 196 clips；按 subject 切分且没有交集；
+- train：3,188,842 native frames → 1,513,690 个 50 Hz tracker frames；
+- val：262,893 native frames → 116,844 个 50 Hz tracker frames；
+- 总计：1,983/1,983 clips、3,451,735 native frames → 1,630,534 tracker
+  frames，conversion reject、missing clip、stale metadata 都为 0；
+- 两份报告均为 `pipeline_integrity_ready=true`；最大 native/final joint velocity
+  ratio 分别约 `1.0000000000000027`/`1.0`，最大 quaternion norm error
+  `<5.1e-8`，`motion_root` contract error 为 0；
+- 逐关节位置按 Bumi MJCF range 检查，最大超限量为约 `1.05e-7 rad`，属于
+  float32 边界误差；不再使用错误的全关节 `abs(q)<3` 假设；
+- train 分流：1,029 automatic、436 geometry review、322 dynamics review；
+- val 分流：121 automatic、38 geometry review、37 dynamics review；
+- 默认 staging 为 train 1,029 clips / 774,163 frames、val 121 clips /
+  80,738 frames；其余数据及 HumanPose24/native qpos/final NPZ 全部保留；
+- AMASS-only、AMASS 0.8 + 36 gait 0.2 和 held-out val 均已用 production
+  staging 完成 16 env、1 PPO update、随机初始化 smoke，无 NaN。
+
+这里“默认 staging 只含 automatic”不等于只转换了这些数据。1,983 条均已转换并可
+追溯；review 集只是不会在未经 replay/人工复核前自动进入正式训练。
+
 #### 6.3 数据布局和配置
 
 ~~~text
@@ -602,22 +624,49 @@ uv --project "$SIM2REAL_ROOT/venv/teleop" run python \
   --resume
 ~~~
 
-### 7.2 production train 转换
+### 7.2 production train/val 转换
 
 ~~~bash
-uv --project "$SIM2REAL_ROOT/venv/teleop" run python \
+PYTHONPATH="$MIMIC_ROOT" \
+uv --project "$AA_ROOT/venv/mjlab" run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python \
   "$MIMIC_ROOT/scripts/convert_amass_to_bumi_tracker.py" \
   --manifest "$RETARGET_ROOT/manifests/train.jsonl" \
   --smplx-model-dir /path/to/smplx/models \
   --gmr-root "$GMR_ROOT" \
   --bumi-mjcf "$BUMI_MJCF" \
+  --actual-human-height 1.6 \
   --target-fps 50 \
   --output "$RETARGET_ROOT/train" \
   --resume \
-  --workers 1
+  --workers 16 \
+  --torch-threads-per-worker 2 \
+  --fail-on-reject
+
+PYTHONPATH="$MIMIC_ROOT" \
+uv --project "$AA_ROOT/venv/mjlab" run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python \
+  "$MIMIC_ROOT/scripts/convert_amass_to_bumi_tracker.py" \
+  --manifest "$RETARGET_ROOT/manifests/val.jsonl" \
+  --smplx-model-dir /path/to/smplx/models \
+  --gmr-root "$GMR_ROOT" \
+  --bumi-mjcf "$BUMI_MJCF" \
+  --actual-human-height 1.6 \
+  --target-fps 50 \
+  --output "$RETARGET_ROOT/val" \
+  --resume \
+  --workers 2 \
+  --torch-threads-per-worker 2 \
+  --fail-on-reject
 ~~~
 
-先固定 `--workers 1` 验证 determinism 和 cache；确认 GMR/model 实例隔离后再并行，不能让多个 clip 共享 warm-start state。
+已用 fixture 的单进程/两进程 resume 验证 determinism 和 cache。production 并行实现使用
+spawn process，每个 worker 独占 GMR/model，clip 边界 reset，不能共享 warm-start
+state。上面的 16/2 workers 是本次实际使用值；资源较小的机器可以降低，但不改变输出。
 
 ### 7.3 staging 和 smoke
 
@@ -625,8 +674,10 @@ uv --project "$SIM2REAL_ROOT/venv/teleop" run python \
 uv --project "$AA_ROOT/venv/mjlab" run python \
   "$MIMIC_ROOT/scripts/prepare_bumi_motion_dataset.py" \
   --source "$RETARGET_ROOT/train/tracker_50hz" \
+  --quality-report "$RETARGET_ROOT/train/reports/quality_summary.json" \
   --output "$AA_ROOT/.cache/mimic-lite/motions/bumi/amass_gmr_train" \
-  --link-mode symlink
+  --report-json "$RETARGET_ROOT/train/reports/staging_summary.json" \
+  --link-mode symlink --force
 
 cd "$AA_ROOT"
 CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \
