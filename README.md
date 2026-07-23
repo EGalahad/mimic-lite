@@ -290,8 +290,45 @@ trained.
 AMASS-only, held-out val, and the AMASS + original 36-gait mixture have each
 completed a 16-env, one-update GPU smoke on these production files. The
 candidate mixture samples AMASS at 0.8 and the original 36 gait clips at 0.2.
-Its formal single-GPU run starts from random weights and keeps the Bumi actuator
-delay/randomization enabled:
+
+##### Browse the retargeted motions with Viser
+
+The batch viewer lazily loads only the selected NPZ, renders the Bumi MuJoCo
+mesh, and overlays the body positions stored by the tracker exporter. By
+default it opens the full production train catalog and infers its quality
+report:
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run --with mjviser==0.0.14 \
+  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py
+```
+
+Open `http://localhost:8090`. The GUI provides clip selection, previous/next,
+play/pause, frame stepping, speed, body-overlay visibility, and an end behavior
+that can automatically advance through the catalog. To inspect a review split
+or held-out motions:
+
+```bash
+# Only clips held for geometry review.
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run --with mjviser==0.0.14 \
+  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
+  --quality-group geometry_review --start-paused
+
+# Held-out val catalog; its quality report is also inferred automatically.
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run --with mjviser==0.0.14 \
+  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
+  --motion-dir "$RETARGET_ROOT/val/tracker_50hz"
+```
+
+Use `--dry-run` to validate every selected file without starting a server.
+The server binds to `127.0.0.1` by default; use SSH port forwarding, or pass
+`--host 0.0.0.0` only when remote network exposure is intended.
+
+The formal single-GPU mixture run starts from random weights and keeps the Bumi
+actuator delay/randomization enabled:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 HF_HUB_OFFLINE=1 HF_HUB_DISABLE_TELEMETRY=1 \

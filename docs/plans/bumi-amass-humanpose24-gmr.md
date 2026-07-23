@@ -510,6 +510,9 @@ production 后继续保存 review 集；不能为提高保留率而事后放松�
   80,738 frames；其余数据及 HumanPose24/native qpos/final NPZ 全部保留；
 - AMASS-only、AMASS 0.8 + 36 gait 0.2 和 held-out val 均已用 production
   staging 完成 16 env、1 PPO update、随机初始化 smoke，无 NaN。
+- `scripts/view_bumi_retarget_viser.py` 可惰性加载全量目录，在 Viser 中切换
+  clip、连续播放/逐帧查看，并按 automatic/geometry/dynamics 质量分组筛选；MuJoCo
+  mesh 与 NPZ 内保存的 body FK overlay 同时显示，用于后续随机 replay 目检。
 
 这里“默认 staging 只含 automatic”不等于只转换了这些数据。1,983 条均已转换并可
 追溯；review 集只是不会在未经 replay/人工复核前自动进入正式训练。
