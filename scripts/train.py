@@ -1,11 +1,13 @@
 import torch
 import hydra
 import wandb
+import json
 import logging
 import time
 import datetime
 from pathlib import Path
 
+from hydra.core.hydra_config import HydraConfig
 from omegaconf import OmegaConf, DictConfig
 
 from collections import OrderedDict
@@ -130,6 +132,7 @@ def main(cfg: DictConfig):
     else:
         stages = ("",)
 
+    metrics_path = None
     if aa.is_main_process():
         run = wandb.init(
             job_type=cfg.wandb.job_type,
@@ -154,6 +157,13 @@ def main(cfg: DictConfig):
         OmegaConf.save(cfg, cfg_save_path)
         run.save(str(cfg_save_path), policy="now")
         run.save(str(run_dir / "config.yaml"), policy="now")
+
+        if cfg.wandb.mode == "disabled":
+            hydra_output_dir = Path(HydraConfig.get().runtime.output_dir)
+            hydra_output_dir.mkdir(parents=True, exist_ok=True)
+            metrics_path = hydra_output_dir / "metrics.jsonl"
+            OmegaConf.save(cfg, hydra_output_dir / "cfg.yaml")
+            logging.info(f"Disabled-W&B metrics will be written to {metrics_path}")
 
     for stage in stages:
         policy.on_stage_start(stage)
@@ -257,6 +267,22 @@ def main(cfg: DictConfig):
                 #     )
                 # )
                 run.log(info)
+                if metrics_path is not None:
+                    metrics_record = {"iteration": start_iter + i}
+                    for key, value in info.items():
+                        if isinstance(value, torch.Tensor):
+                            if value.numel() != 1:
+                                continue
+                            value = value.detach().item()
+                        elif hasattr(value, "item"):
+                            try:
+                                value = value.item()
+                            except (TypeError, ValueError):
+                                continue
+                        if isinstance(value, (bool, int, float, str)) or value is None:
+                            metrics_record[key] = value
+                    with metrics_path.open("a") as metrics_file:
+                        metrics_file.write(json.dumps(metrics_record, sort_keys=True) + "\n")
 
     if aa.is_main_process():
         ckpt_path = save(policy, f"checkpoint_{total_iters}")

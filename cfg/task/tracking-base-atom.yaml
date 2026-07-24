@@ -64,6 +64,9 @@ max_episode_length: 1000
 sim:
   step_dt: 0.02
   isaac_physics_dt: 0.005
+  mjlab_nconmax: 200
+  mjlab_njmax: 1000
+  mjlab_occupancy_diagnostics: false
 
 robot:
   name: atom01-capsule
@@ -307,7 +310,7 @@ randomization:
   perturb_body_com:
     "base_link|torso_link": [-0.03, 0.03]
 
-  motor_params_implicit:
+  actuator_params:
     stiffness_range:
       ".*(arm|elbow).*": [0.9, 1.1]
       ".*(torso|thigh|knee|ankle).*": [0.8, 1.2]

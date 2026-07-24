@@ -115,8 +115,8 @@ def export_policy(cfg: DictConfig, env: "_EnvBase", policy) -> None:
     checkpoint_path = parse_checkpoint_path(cfg.checkpoint_path)
     wandb_run_id, checkpoint_num = _checkpoint_tags(checkpoint_path)
 
-    deploy_policy = copy.deepcopy(policy.get_rollout_policy("deploy")).cpu()
-    fake_input = env.observation_spec[0].rand().cpu()
+    deploy_policy = copy.deepcopy(policy.get_rollout_policy("deploy")).eval()
+    fake_input = env.observation_spec[0].rand().to(env.device)
 
     export_dir = FILE_PATH / "exports" / str(cfg.task.name)
     export_dir.mkdir(parents=True, exist_ok=True)

@@ -1,0 +1,13 @@
+# @package algo
+
+# Directly train the deployable PPO actor with the same encoder-decoder
+# architecture used by the PPO-ROA student. Privileged observations remain
+# available to the asymmetric critic but are never inputs to the actor.
+encoder_in_keys: [policy, command]
+use_actor_encoder: true
+encoder_hidden_dims: [1024, 1024]
+latent_dim: 1024
+actor_in_keys: [policy]
+actor_hidden_dims: [1024, 1024, 1024]
+critic_hidden_dims: [1024, 512, 512]
+in_keys: [command, policy, priv]

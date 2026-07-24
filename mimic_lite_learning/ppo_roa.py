@@ -1,5 +1,6 @@
 import warnings
 from collections import OrderedDict
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import List, Tuple, Union, Mapping
 import os
@@ -38,6 +39,7 @@ from active_adaptation.learning.ppo.common import (
     make_batch,
     make_mlp,
 )
+from active_adaptation.learning.utils.opt import MuonAdamWWrapper
 from active_adaptation.learning.utils.valuenorm import ValueNorm1, ValueNormFake
 from active_adaptation.learning.ppo.ppo_base import PPOBase
 from active_adaptation.utils.profiling import ScopedTimer
@@ -69,18 +71,22 @@ class PPOConfig:
     _target_: str = f"{__package__}.ppo_roa.PPOROA"
     name: str = "ppo_roa"
     train_every: int = 32
-    ppo_epochs: int = 3
+    ppo_epochs: int = 5
     num_minibatches: int = 8
     clip_param: float = 0.2
     gamma: float = 0.99
     lmbda: float = 0.95
 
     residual_action: bool = False
-    teacher_use_priv: bool = False
+    teacher_use_priv: bool = True
 
-    lr: float = 3e-4
+    policy_lr: float = 3e-4
+    critic_lr: float = 3e-4
     desired_kl: float | None = 0.01
+    opt: str = "muon"
     reg_coef: float = 0.2
+    reg_warmup_start: int = 500
+    reg_warmup_end: int = 1000
 
     entropy_coef_start: float = 0.004
     entropy_coef_end: float = 0.004
@@ -95,24 +101,37 @@ class PPOConfig:
     layer_norm: Union[str, None] = "before"
     value_norm: bool = False
 
-    latent_dim: int = 512
+    latent_dim: int = 256
     encoder_teacher_dims: Tuple[int, ...] = (512,)
     encoder_student_dims: Tuple[int, ...] = (512, 512)
-    actor_hidden_dims: Tuple[int, ...] = (512, 512, 512)
-    critic_hidden_dims: Tuple[int, ...] = (512, 256, 128)
+    actor_hidden_dims: Tuple[int, ...] = (1024, 512, 512)
+    critic_hidden_dims: Tuple[int, ...] = (1024, 512, 512)
     max_grad_norm: float = 1.0
+    value_chunk_size: int | None = 65536
 
     phase: str = "train"
     vecnorm: bool = True
     freeze_vecnorm: bool = False
+    # Experiment-only finetune ablation. Canonical finetune leaves this false.
+    finetune_freeze_encoder: bool = False
+    # Experimental until the encoder-clipping ablation establishes the default.
+    finetune_clip_encoder_grads: bool = False
     checkpoint_path: Union[str, None] = None
     in_keys: Tuple[str, ...] = (CMD_KEY, CMD_SHORT_KEY, OBS_KEY, OBS_PRIV_KEY)
 
-    # TODO: ddp sync mode has some bugs
-    grad_sync_mode: str | None = "manual" # Options: "ddp", "manual", None
+    grad_sync_mode: str | None = "ddp"  # Options: "ddp", "manual", None
     manual_construct_dist_now: bool = True
+    train_amp_dtype: str | None = None
 
     def __post_init__(self):
+        if isinstance(self.opt, str):
+            self.opt = self.opt.lower()
+
+        if self.opt not in {"adam", "adamw", "muon"}:
+            raise ValueError(
+                "opt must be one of {'adam', 'adamw', 'muon'}, " f"got {self.opt!r}"
+            )
+
         if isinstance(self.grad_sync_mode, str):
             self.grad_sync_mode = self.grad_sync_mode.lower()
             if self.grad_sync_mode in {"none", "null"}:
@@ -124,6 +143,22 @@ class PPOConfig:
                 f"got {self.grad_sync_mode!r}"
             )
 
+        if isinstance(self.train_amp_dtype, str):
+            self.train_amp_dtype = self.train_amp_dtype.lower()
+            if self.train_amp_dtype in {"none", "null", "false", "0"}:
+                self.train_amp_dtype = None
+        if self.train_amp_dtype not in {
+            None,
+            "bf16",
+            "bfloat16",
+            "fp16",
+            "float16",
+        }:
+            raise ValueError(
+                "train_amp_dtype must be one of {'bf16', 'bfloat16', "
+                "'fp16', 'float16', None}, "
+                f"got {self.train_amp_dtype!r}"
+            )
 
 cs = ConfigStore.instance()
 cs.store("ppo_roa_train", node=PPOConfig(phase="train"), group="algo")
@@ -167,6 +202,13 @@ class PPOROA(PPOBase):
         self.joint_names = env.action_manager.joint_names
 
         self._build_vecnorm_modules(observation_spec)
+        self._train_amp_dtype = None
+        if self.cfg.train_amp_dtype is not None:
+            self._train_amp_dtype = (
+                torch.bfloat16
+                if self.cfg.train_amp_dtype in {"bf16", "bfloat16"}
+                else torch.float16
+            )
 
         observation_keys = set(observation_spec.keys(True, True))
         missing_keys = sorted(
@@ -321,25 +363,46 @@ class PPOROA(PPOBase):
             if self.cfg.phase == "train":
                 policy_modules += [self.actor_teacher, self.encoder_teacher]
             else:
-                policy_modules += [self.actor_student, self.encoder_student]
+                policy_modules.append(self.actor_student)
+                if self.cfg.finetune_freeze_encoder:
+                    self.encoder_student.requires_grad_(False)
+                else:
+                    policy_modules.append(self.encoder_student)
 
-            self.lr_policy = self.cfg.lr
-            policy_params = [
-                {"params": module.parameters()} for module in policy_modules
-            ]
-            self.opt_policy = torch.optim.Adam(policy_params, lr=self.lr_policy)
-            self.opt_critic = torch.optim.Adam(self.critic.parameters(), lr=self.cfg.lr)
+            self.lr_policy = self.cfg.policy_lr
+            self.opt_policy = self._make_optimizer(
+                policy_modules, lr=self.lr_policy
+            )
+            self.opt_critic = self._make_optimizer(
+                [self.critic], lr=self.cfg.critic_lr
+            )
 
         if self.cfg.phase in {"train", "adapt"}:
             adapt_modules: List[nn.Module] = [self.encoder_student]
             if self.cfg.residual_action:
                 adapt_modules.append(self.actor_student)
-            adapt_parameters = [
-                {"params": module.parameters()} for module in adapt_modules
-            ]
-            self.opt_adapt = torch.optim.Adam(adapt_parameters, lr=self.cfg.lr)
+            self.opt_adapt = self._make_optimizer(
+                adapt_modules, lr=self.cfg.policy_lr
+            )
 
         self.num_updates = 0
+        self.entropy_coef = self.cfg.entropy_coef_start
+        self.reg_coef = 0.0
+
+    def _make_optimizer(
+        self, modules: List[nn.Module], *, lr: float
+    ) -> torch.optim.Optimizer:
+        if self.cfg.opt == "muon":
+            return MuonAdamWWrapper(modules, lr=lr, weight_decay=0.01)
+        if self.cfg.opt == "adam":
+            return torch.optim.Adam(
+                [param for module in modules for param in module.parameters()], lr=lr
+            )
+        return torch.optim.AdamW(
+            [param for module in modules for param in module.parameters()],
+            lr=lr,
+            weight_decay=0.01,
+        )
 
     def _build_vecnorm_modules(self, observation_spec: CompositeSpec):
         modules = []
@@ -361,6 +424,47 @@ class PPOROA(PPOBase):
     def compute_value(self, tensordict):
         self.vecnorm(tensordict)
         return self.critic(tensordict)
+
+    @torch.no_grad()
+    def _critic_values_chunked(self, tensordict: TensorDict) -> torch.Tensor:
+        critic = self.critic.module if isinstance(self.critic, DDP) else self.critic
+        tensordict_flat = tensordict.view(-1)
+        numel = tensordict_flat.numel()
+        chunk_size = self.cfg.value_chunk_size
+
+        if chunk_size is None or numel <= chunk_size:
+            values = critic(tensordict_flat)["state_value"]
+            return values.view(*tensordict.batch_size, *values.shape[1:])
+
+        values_flat = None
+        for start in range(0, numel, chunk_size):
+            end = min(start + chunk_size, numel)
+            chunk_values = critic(tensordict_flat[start:end])["state_value"]
+            if values_flat is None:
+                values_flat = chunk_values.new_empty(
+                    (numel, *chunk_values.shape[1:])
+                )
+            values_flat[start:end].copy_(chunk_values)
+
+        assert values_flat is not None
+        return values_flat.view(*tensordict.batch_size, *values_flat.shape[1:])
+
+    @VecNorm.freeze()
+    @torch.no_grad()
+    def compute_rollout_values(self, tensordict: TensorDict, carry: TensorDict):
+        values = self._critic_values_chunked(tensordict)
+        last_value = self.compute_value(carry)["state_value"]
+
+        next_values = torch.empty_like(values)
+        next_values[:, :-1].copy_(values[:, 1:])
+        next_values[:, -1].copy_(last_value)
+
+        tensordict.set("state_value", values)
+        tensordict.set(
+            ("next", "state_value"),
+            torch.where(tensordict["next", "done"], values, next_values),
+        )
+        return tensordict
 
     def _wrap_ddp(self, local_rank: int):
         ddp_kwargs = dict(
@@ -410,6 +514,15 @@ class PPOROA(PPOBase):
                     continue
                 dist.all_reduce(param.grad.data, op=dist.ReduceOp.AVG)
 
+    def _train_autocast(self):
+        if self._train_amp_dtype is None:
+            return nullcontext()
+        return torch.autocast(
+            device_type=torch.device(self.device).type,
+            dtype=self._train_amp_dtype,
+            enabled=torch.device(self.device).type == "cuda",
+        )
+
     def get_next_saved_keys(self):
         return ()
 
@@ -418,6 +531,33 @@ class PPOROA(PPOBase):
 
     def _get_current_iter(self) -> int:
         return int(getattr(self.env, "current_iter", 0))
+
+    @staticmethod
+    def _linear_schedule(
+        current_iter: int,
+        start_value: float,
+        end_value: float,
+        start_iter: int,
+        end_iter: int,
+    ) -> float:
+        if current_iter <= start_iter:
+            return start_value
+        if current_iter >= end_iter:
+            return end_value
+        if end_iter <= start_iter:
+            return end_value
+        progress = (current_iter - start_iter) / (end_iter - start_iter)
+        return start_value + (end_value - start_value) * progress
+
+    def _update_policy_lr(self, mean_kl: float) -> None:
+        if self.desired_kl is None:
+            return
+        if mean_kl > self.desired_kl * 2.0:
+            self.lr_policy = max(1e-5, self.lr_policy / 1.2)
+        elif 0.0 < mean_kl < self.desired_kl / 2.0:
+            self.lr_policy = min(1e-2, self.lr_policy * 1.2)
+        for param_group in self.opt_policy.param_groups:
+            param_group["lr"] = self.lr_policy
 
     def get_rollout_policy(self, mode: str = "train", critic: bool = False):
         if mode == "deploy":
@@ -449,7 +589,7 @@ class PPOROA(PPOBase):
             out_keys = [f"{ACTION_KEY}_log_prob", ACTION_KEY] + self.dist_keys
 
         rollout_policy = Seq(*modules, selected_out_keys=out_keys)
-        if self.cfg.freeze_vecnorm:
+        if mode == "deploy" or self.cfg.freeze_vecnorm:
             rollout_policy.forward = VecNorm.freeze()(rollout_policy.forward)
         return rollout_policy
 
@@ -529,23 +669,22 @@ class PPOROA(PPOBase):
                 tensordict, self.critic, "adv", "ret", update_value_norm=True
             )
 
-        with ScopedTimer("training.policy.entropy_schedule", sync=False):
+        with ScopedTimer("training.policy.schedules", sync=False):
             current_iter = self._get_current_iter()
-            if current_iter <= self.cfg.entropy_decay_start:
-                self.entropy_coef = self.cfg.entropy_coef_start
-            elif current_iter >= self.cfg.entropy_decay_end:
-                self.entropy_coef = self.cfg.entropy_coef_end
-            elif self.cfg.entropy_decay_end > self.cfg.entropy_decay_start:
-                progress = float(
-                    (current_iter - self.cfg.entropy_decay_start)
-                    / (self.cfg.entropy_decay_end - self.cfg.entropy_decay_start)
-                )
-                self.entropy_coef = (
-                    self.cfg.entropy_coef_start
-                    + (self.cfg.entropy_coef_end - self.cfg.entropy_coef_start) * progress
-                )
-            else:
-                self.entropy_coef = self.cfg.entropy_coef_end
+            self.entropy_coef = self._linear_schedule(
+                current_iter,
+                self.cfg.entropy_coef_start,
+                self.cfg.entropy_coef_end,
+                self.cfg.entropy_decay_start,
+                self.cfg.entropy_decay_end,
+            )
+            self.reg_coef = self._linear_schedule(
+                current_iter,
+                0.0,
+                self.cfg.reg_coef,
+                self.cfg.reg_warmup_start,
+                self.cfg.reg_warmup_end,
+            )
 
         with ScopedTimer("training.policy.minibatch_loop", sync=False):
             for _ in range(self.cfg.ppo_epochs):
@@ -554,23 +693,16 @@ class PPOROA(PPOBase):
                         info = self._update_ppo(minibatch)
                     infos.append(info)
 
-                    with ScopedTimer("training.policy.kl_lr_adjust", sync=False):
-                        if self.desired_kl is not None:
-                            kl = info["actor/kl"]
-                            if aa.is_distributed():
-                                dist.all_reduce(kl, op=dist.ReduceOp.AVG)
-                            if kl > self.desired_kl * 2.0:
-                                self.lr_policy = max(1e-5, self.lr_policy / 1.5)
-                            elif kl < self.desired_kl / 2.0 and kl > 0.0:
-                                self.lr_policy = min(1e-2, self.lr_policy * 1.5)
-
-                        for param_group in self.opt_policy.param_groups:
-                            param_group["lr"] = self.lr_policy
-
         with ScopedTimer("training.policy.aggregate_infos", sync=False):
             infos = pytree.tree_map(lambda *xs: sum(xs).item() / len(xs), *infos)
+            if self.desired_kl is not None:
+                mean_kl = torch.tensor(infos["actor/kl"], device=self.device)
+                if aa.is_distributed():
+                    dist.all_reduce(mean_kl, op=dist.ReduceOp.AVG)
+                self._update_policy_lr(mean_kl.item())
             infos["actor/lr"] = self.lr_policy
             infos["actor/entropy_coef"] = self.entropy_coef
+            infos["actor/reg_coef"] = self.reg_coef
 
             ret = tensordict["ret"]
             ret_mean = ret.mean(dim=(0, 1))
@@ -586,10 +718,6 @@ class PPOROA(PPOBase):
     def train_adapt(self, tensordict: TensorDict):
         infos = []
 
-        with ScopedTimer("training.adapt.teacher_encoder", sync=PROFILE_SYNC_TIMERS):
-            with torch.no_grad():
-                self.encoder_teacher(tensordict)
-
         with ScopedTimer("training.adapt.minibatch_loop", sync=False):
             for _ in range(2):
                 for minibatch in make_batch(
@@ -599,33 +727,44 @@ class PPOROA(PPOBase):
                     valid = ~minibatch["is_init"].squeeze(-1)
 
                     with ScopedTimer(
+                        "training.adapt.teacher_encoder",
+                        sync=PROFILE_SYNC_TIMERS,
+                    ):
+                        with torch.no_grad():
+                            self.encoder_teacher(minibatch)
+
+                    with ScopedTimer(
                         "training.adapt.student_forward_loss",
                         sync=PROFILE_SYNC_TIMERS,
                     ):
-                        self.encoder_student(minibatch)
-                        priv_loss = F.mse_loss(
-                            minibatch[PRIV_STUDENT_KEY],
-                            minibatch[PRIV_TEACHER_KEY],
-                            reduction="none",
-                        )
-                        priv_loss = priv_loss[valid].mean()
+                        with self._train_autocast():
+                            self.encoder_student(minibatch)
+                            priv_loss = F.mse_loss(
+                                minibatch[PRIV_STUDENT_KEY],
+                                minibatch[PRIV_TEACHER_KEY],
+                                reduction="none",
+                            )
+                            priv_loss = priv_loss[valid].mean()
 
                     if self.cfg.residual_action:
                         with ScopedTimer(
                             "training.adapt.actor_dist_loss",
                             sync=PROFILE_SYNC_TIMERS,
                         ):
-                            with torch.no_grad():
-                                dist_teacher = self.actor_teacher.get_dist(minibatch)
+                            with self._train_autocast():
+                                with torch.no_grad():
+                                    dist_teacher = self.actor_teacher.get_dist(minibatch)
 
-                            minibatch[PRIV_STUDENT_KEY] = minibatch[
-                                PRIV_STUDENT_KEY
-                            ].detach()
-                            dist_student = self.actor_student.get_dist(minibatch)
-                            actor_loss = F.mse_loss(
-                                dist_teacher.mean, dist_student.mean, reduction="none"
-                            )
-                            actor_loss = actor_loss[valid].mean()
+                                minibatch[PRIV_STUDENT_KEY] = minibatch[
+                                    PRIV_STUDENT_KEY
+                                ].detach()
+                                dist_student = self.actor_student.get_dist(minibatch)
+                                actor_loss = F.mse_loss(
+                                    dist_teacher.mean,
+                                    dist_student.mean,
+                                    reduction="none",
+                                )
+                                actor_loss = actor_loss[valid].mean()
                     else:
                         actor_loss = torch.zeros((), device=self.device)
 
@@ -741,14 +880,19 @@ class PPOROA(PPOBase):
         dist_kwargs_old = tensordict.select(*self.dist_keys)
 
         with ScopedTimer("training.policy.ppo.encode", sync=PROFILE_SYNC_TIMERS):
-            if self.cfg.phase == "train":
-                self.encoder_teacher(tensordict)
-                actor = self.actor_teacher
-            elif self.cfg.phase == "finetune":
-                self.encoder_student(tensordict)
-                actor = self.actor_student
-            else:
-                raise ValueError(f"Invalid phase: {self.cfg.phase}")
+            with self._train_autocast():
+                if self.cfg.phase == "train":
+                    self.encoder_teacher(tensordict)
+                    actor = self.actor_teacher
+                elif self.cfg.phase == "finetune":
+                    if self.cfg.finetune_freeze_encoder:
+                        with torch.no_grad():
+                            self.encoder_student(tensordict)
+                    else:
+                        self.encoder_student(tensordict)
+                    actor = self.actor_student
+                else:
+                    raise ValueError(f"Invalid phase: {self.cfg.phase}")
 
         [tensordict.pop(key) for key in self.dist_keys]
         action_old = tensordict.pop(ACTION_KEY)
@@ -756,18 +900,18 @@ class PPOROA(PPOBase):
         with ScopedTimer(
             "training.policy.ppo.actor_dist", sync=PROFILE_SYNC_TIMERS
         ):
-            if self.cfg.manual_construct_dist_now:
-                actor_base = actor.module if isinstance(actor, DDP) else actor
-                actor_base(tensordict)
-                dist_now = self.dist_cls(
-                    loc=tensordict["loc"], scale=tensordict["scale"]
-                )
-            else:
-                dist_now: D.Independent = actor.get_dist(tensordict)
+            with self._train_autocast():
+                if self.cfg.manual_construct_dist_now:
+                    actor(tensordict)
+                    dist_now = self.dist_cls(
+                        loc=tensordict["loc"], scale=tensordict["scale"]
+                    )
+                else:
+                    dist_now: D.Independent = actor.get_dist(tensordict)
 
-            with set_composite_lp_aggregate(True):
-                log_probs = dist_now.log_prob(action_old)
-            entropy = dist_now.entropy().mean()
+                with set_composite_lp_aggregate(True):
+                    log_probs = dist_now.log_prob(action_old)
+                entropy = dist_now.entropy().mean()
 
         valid = ~tensordict["is_init"].squeeze(-1)
 
@@ -781,30 +925,32 @@ class PPOROA(PPOBase):
             entropy_loss = -self.entropy_coef * entropy
 
         with ScopedTimer("training.policy.ppo.critic", sync=PROFILE_SYNC_TIMERS):
-            b_returns = tensordict["ret"]
-            values = self.critic(tensordict)["state_value"]
-            value_loss = F.mse_loss(b_returns, values, reduction="none")
-            value_loss = value_loss[valid].mean(dim=0)
+            with self._train_autocast():
+                b_returns = tensordict["ret"]
+                values = self.critic(tensordict)["state_value"]
+                value_loss = F.mse_loss(b_returns, values, reduction="none")
+                value_loss = value_loss[valid].mean(dim=0)
 
         with ScopedTimer("training.policy.ppo.reg_loss", sync=PROFILE_SYNC_TIMERS):
-            if self.cfg.phase == "train":
-                if PRIV_STUDENT_KEY not in tensordict.keys():
-                    with torch.no_grad():
-                        self.encoder_student(tensordict)
-                reg_loss = F.mse_loss(
-                    tensordict[PRIV_STUDENT_KEY],
-                    tensordict[PRIV_TEACHER_KEY],
-                    reduction="none",
-                )
-                reg_loss = torch.mean(reg_loss[valid])
-            else:
-                reg_loss = torch.zeros((), device=self.device)
+            with self._train_autocast():
+                if self.cfg.phase == "train":
+                    if PRIV_STUDENT_KEY not in tensordict.keys():
+                        with torch.no_grad():
+                            self.encoder_student(tensordict)
+                    reg_loss = F.mse_loss(
+                        tensordict[PRIV_STUDENT_KEY],
+                        tensordict[PRIV_TEACHER_KEY],
+                        reduction="none",
+                    )
+                    reg_loss = torch.mean(reg_loss[valid])
+                else:
+                    reg_loss = torch.zeros((), device=self.device)
 
         loss = (
             policy_loss
             + entropy_loss
             + value_loss.mean()
-            + self.cfg.reg_coef * reg_loss
+            + self.reg_coef * reg_loss
         )
 
         with ScopedTimer("training.policy.ppo.backward", sync=PROFILE_SYNC_TIMERS):
@@ -823,18 +969,47 @@ class PPOROA(PPOBase):
                     self.critic,
                 )
         with ScopedTimer("training.policy.ppo.clip_grad", sync=PROFILE_SYNC_TIMERS):
-            actor_grad_norm = nn.utils.clip_grad_norm_(
-                actor.parameters(), self.cfg.max_grad_norm
-            )
             critic_grad_norm = nn.utils.clip_grad_norm_(
                 self.critic.parameters(), self.cfg.max_grad_norm
             )
             if self.cfg.phase == "train":
+                actor_grad_norm = nn.utils.clip_grad_norm_(
+                    actor.parameters(), self.cfg.max_grad_norm
+                )
                 priv_grad_norm = nn.utils.clip_grad_norm_(
                     self.encoder_teacher.parameters(), self.cfg.max_grad_norm
                 )
+                student_encoder_grad_norm = torch.zeros(1, device=self.device)
+                policy_grad_norm = torch.sqrt(
+                    actor_grad_norm.square() + priv_grad_norm.square()
+                )
             else:
                 priv_grad_norm = torch.zeros(1, device=self.device)
+                actor_grad_norm = nn.utils.clip_grad_norm_(
+                    actor.parameters(), float("inf")
+                )
+                if self.cfg.finetune_freeze_encoder:
+                    student_encoder_grad_norm = torch.zeros(1, device=self.device)
+                else:
+                    student_encoder_grad_norm = nn.utils.clip_grad_norm_(
+                        self.encoder_student.parameters(), float("inf")
+                    )
+                policy_grad_norm = torch.sqrt(
+                    actor_grad_norm.square() + student_encoder_grad_norm.square()
+                )
+                if (
+                    self.cfg.finetune_clip_encoder_grads
+                    and not self.cfg.finetune_freeze_encoder
+                ):
+                    nn.utils.clip_grad_norm_(
+                        list(actor.parameters())
+                        + list(self.encoder_student.parameters()),
+                        self.cfg.max_grad_norm,
+                    )
+                else:
+                    nn.utils.clip_grad_norm_(
+                        actor.parameters(), self.cfg.max_grad_norm
+                    )
         with ScopedTimer(
             "training.policy.ppo.optimizer_step", sync=PROFILE_SYNC_TIMERS
         ):
@@ -853,6 +1028,7 @@ class PPOROA(PPOBase):
         info = {
             "actor/policy_loss": policy_loss.detach(),
             "actor/reg_loss": reg_loss.detach(),
+            "actor/reg_loss_weighted": (self.reg_coef * reg_loss).detach(),
             "actor/clamp_ratio": clipfrac.detach(),
             "actor/entropy": entropy.detach(),
             "actor/mean_std": tensordict["scale"].detach().mean(),
@@ -865,6 +1041,10 @@ class PPOROA(PPOBase):
 
         info["opt/grad_norm.critic"] = critic_grad_norm.detach()
         info["opt/grad_norm.encoder_priv"] = priv_grad_norm.detach()
+        info["opt/grad_norm.encoder_student"] = (
+            student_encoder_grad_norm.detach()
+        )
+        info["opt/grad_norm.policy"] = policy_grad_norm.detach()
         info["opt/grad_norm.actor"] = actor_grad_norm.detach()
         return info
 

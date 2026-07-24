@@ -63,6 +63,10 @@ max_episode_length: 1000
 sim:
   step_dt: 0.02
   isaac_physics_dt: 0.005
+  # Exact 8x8192 PPO-ROA huge peaks at 17.64 contacts/world and 302 constraints.
+  mjlab_nconmax: 128
+  mjlab_njmax: 640
+  mjlab_occupancy_diagnostics: false
 
 robot:
   # name: g1-mode_5
@@ -310,7 +314,7 @@ randomization:
   perturb_body_com:
     "pelvis|torso_link": [-0.03, 0.03]
 
-  motor_params_implicit:
+  actuator_params:
     stiffness_range:
       ".*(shoulder|elbow|wrist).*": [0.9, 1.1]
       ".*(waist|hip|knee|ankle).*": [0.8, 1.2]

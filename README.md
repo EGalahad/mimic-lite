@@ -73,6 +73,27 @@ bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py 
   task=tracking-base task/motion=g1/mixture +exp=ppo/train backend=mjlab
 ```
 
+The recommended PPO defaults use the deployable encoder-decoder student,
+Muon, BF16/DDP, 5 epochs x 8 minibatches, joint actor gradient clipping at 4,
+and entropy `0.008 -> 0.002` from iteration 500 to 3500. Rollout and training
+module compilation are disabled: the RP1 factorial ablation found that both
+compiled branches learned worse tracking curves, while joint clipping without
+compile matched the PPO-ROA teacher.
+
+Select the actor observation mode through the module config:
+
+- Default direct student: `+exp=ppo/train`; the encoder consumes `policy` and
+  `command`, without privileged actor observations.
+- Privileged teacher diagnostic: add `algo/ppo/module=roa_teacher`; the encoder
+  consumes `priv` while the actor also consumes `policy`.
+- Original single-MLP actor: add an ordinary module such as
+  `algo/ppo/module=large`; it consumes `actor_in_keys` directly.
+
+Keep `algo.compile=false`, `algo.compile_rollout=false`, and
+`algo.compile_train_modules=false` unless compilation is revalidated with a
+new controlled training ablation. BF16 and DDP were separately cleared and
+should remain enabled.
+
 Each `motion_cfgs` entry controls partitioning and runtime storage independently:
 
 - `shard: true` gives each distributed rank a disjoint, motion-aligned subset; it defaults to `false`.

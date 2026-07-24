@@ -1,6 +1,7 @@
 # @package _global_
 
 defaults:
+  - /algo/ppo_roa/module: axell_unified
   - override /algo: ppo_roa_train
 
 total_iters: 4000
@@ -9,7 +10,21 @@ upload_interval: 1000
 
 algo:
   freeze_vecnorm: false
-  entropy_coef_start: 0.012
+  teacher_use_priv: true
+  opt: muon
+  grad_sync_mode: ddp
+  train_amp_dtype: bf16
+  policy_lr: 0.0003
+  critic_lr: 0.0003
+  ppo_epochs: 5
+  num_minibatches: 8
+  entropy_coef_start: 0.008
   entropy_coef_end: 0.002
-  entropy_decay_start: 2000
-  entropy_decay_end: 3000
+  entropy_decay_start: 500
+  entropy_decay_end: 3500
+  reg_coef: 0.2
+  reg_warmup_start: 500
+  reg_warmup_end: 1000
+
+task:
+  num_envs: 8192

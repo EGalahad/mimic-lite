@@ -1,6 +1,7 @@
 # @package _global_
 
 defaults:
+  - /algo/ppo_roa/module: axell_unified
   - override /algo: ppo_roa_finetune
 
 total_iters: 1000
@@ -9,6 +10,12 @@ upload_interval: 1000
 
 algo:
   freeze_vecnorm: true
+  opt: muon
+  policy_lr: 0.0001
+  critic_lr: 0.0001
+  max_grad_norm: 1.0
+  # Finetune starts from the terminal exploration level of teacher training;
+  # restarting at 0.008 immediately inflates student action std.
   entropy_coef_start: 0.002
   entropy_coef_end: 0.001
   entropy_decay_start: 500

@@ -1,0 +1,12 @@
+# @package algo
+
+# Plain PPO with the same privileged encoder/actor and critic capacity as the
+# PPO-ROA teacher. This intentionally does not add ROA distillation or latent
+# regularization, so it isolates architecture and PPO update count.
+encoder_in_keys: [priv]
+use_actor_encoder: true
+encoder_hidden_dims: [1024, 1024]
+latent_dim: 1024
+actor_in_keys: [policy]
+actor_hidden_dims: [1024, 1024, 1024]
+critic_hidden_dims: [1024, 512, 512]
