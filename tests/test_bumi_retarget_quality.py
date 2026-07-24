@@ -32,6 +32,7 @@ class BumiRetargetQualityTest(unittest.TestCase):
         joint_velocity: float,
         joint_index: int = 0,
         geometry_pass: bool = True,
+        ground_pass: bool | None = True,
     ) -> None:
         tracker = root / "tracker_50hz" / "clip.npz"
         tracker.parent.mkdir(parents=True, exist_ok=True)
@@ -50,18 +51,21 @@ class BumiRetargetQualityTest(unittest.TestCase):
         )
         metadata = root / "metadata" / "clip.json"
         metadata.parent.mkdir(parents=True, exist_ok=True)
+        result = {
+            "clip_id": "clip",
+            "source_relative_path": "D/S/M.npz",
+            "source_fps": 120.0,
+            "gate_position_pass": geometry_pass,
+            "gate_foot_position_pass": geometry_pass,
+            "gate_orientation_pass": geometry_pass,
+        }
+        if ground_pass is not None:
+            result["gate_ground_contact_pass"] = ground_pass
         metadata.write_text(
             json.dumps(
                 {
                     "tracker_sha256": sha256_file(tracker),
-                    "result": {
-                        "clip_id": "clip",
-                        "source_relative_path": "D/S/M.npz",
-                        "source_fps": 120.0,
-                        "gate_position_pass": geometry_pass,
-                        "gate_foot_position_pass": geometry_pass,
-                        "gate_orientation_pass": geometry_pass,
-                    },
+                    "result": result,
                 }
             )
         )
@@ -102,6 +106,29 @@ class BumiRetargetQualityTest(unittest.TestCase):
             self.assertTrue(report["pipeline_integrity_ready"])
             self.assertEqual(report["geometry_review"], 1)
             self.assertEqual(report["automatic_training_ready"], 0)
+
+            self._write_record(
+                root,
+                joint_velocity=0.0,
+                ground_pass=False,
+            )
+            report = MODULE.build_report(root)
+            self.assertTrue(report["pipeline_integrity_ready"])
+            self.assertEqual(report["geometry_review"], 1)
+            self.assertEqual(
+                report["gate_failures"]["gate_ground_contact_pass"],
+                ["D/S/M.npz"],
+            )
+
+            # Pipeline-v2 metadata remains reportable; the new ground gate is
+            # only enforced on records that actually contain the measurement.
+            self._write_record(
+                root,
+                joint_velocity=0.0,
+                ground_pass=None,
+            )
+            report = MODULE.build_report(root)
+            self.assertTrue(report["production_ready"])
 
     def test_current_batch_report_hides_stale_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

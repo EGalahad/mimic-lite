@@ -28,11 +28,18 @@ import mujoco
 import numpy as np
 
 from .bumi import (
+    BUMI_FOOT_CONTACT_GEOM_NAMES,
+    BUMI_GROUND_MAX_ABS_OFFSET_M,
+    BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION,
+    BUMI_GROUND_MAX_PENETRATION_M,
+    BUMI_GROUND_REFERENCE_PERCENTILE,
+    BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M,
     BUMI_JOINT_VELOCITY_LIMITS,
     BUMI_POLICY_JOINT_NAMES,
     BUMI_ROOT_ANGULAR_VELOCITY_LIMIT,
     BUMI_ROOT_LINEAR_VELOCITY_LIMIT,
     TARGET_TRACKER_FPS,
+    align_bumi_qpos_to_ground,
     export_bumi_tracking_npz,
     nominal_bumi_qpos,
     validate_bumi_model,
@@ -40,7 +47,7 @@ from .bumi import (
 
 
 MANIFEST_SCHEMA_VERSION = 1
-PIPELINE_VERSION = 2
+PIPELINE_VERSION = 3
 REQUIRED_AMASS_FIELDS = (
     "pose_body",
     "root_orient",
@@ -558,6 +565,20 @@ class AmassToBumiConverter:
             "joint_velocity_limits": BUMI_JOINT_VELOCITY_LIMITS,
             "root_linear_velocity_limit": BUMI_ROOT_LINEAR_VELOCITY_LIMIT,
             "root_angular_velocity_limit": BUMI_ROOT_ANGULAR_VELOCITY_LIMIT,
+            "ground_alignment": {
+                "foot_contact_geom_names": [
+                    list(names) for names in BUMI_FOOT_CONTACT_GEOM_NAMES
+                ],
+                "reference_percentile": BUMI_GROUND_REFERENCE_PERCENTILE,
+                "target_foot_contact_height_m": (
+                    BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M
+                ),
+                "max_abs_offset_m": BUMI_GROUND_MAX_ABS_OFFSET_M,
+                "max_penetration_m": BUMI_GROUND_MAX_PENETRATION_M,
+                "max_penetrating_frame_fraction": (
+                    BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION
+                ),
+            },
         }
 
     def _paths(self, entry: AmassManifestEntry) -> dict[str, Path]:
@@ -742,6 +763,7 @@ class AmassToBumiConverter:
             sequence,
             initial_qpos=self.initial_qpos,
         )
+        qpos, ground_quality = align_bumi_qpos_to_ground(self.model, qpos)
         qpos_quality = self._qpos_quality(qpos, sequence.timestamps_s)
         diagnostics_arrays = {
             key: np.asarray([item[key] for item in diagnostics])
@@ -878,6 +900,22 @@ class AmassToBumiConverter:
                 high_priority_orientation_p95_rad < np.deg2rad(15.0)
             ),
             **qpos_quality,
+            **ground_quality,
+            "tracker_min_foot_contact_height_m": float(
+                export_stats["tracker_min_foot_contact_height_m"]
+            ),
+            "tracker_foot_contact_below_ground_fraction": float(
+                export_stats["tracker_foot_contact_below_ground_fraction"]
+            ),
+            "tracker_foot_contact_below_minus_5mm_fraction": float(
+                export_stats[
+                    "tracker_foot_contact_below_minus_5mm_fraction"
+                ]
+            ),
+            "gate_ground_contact_pass": bool(
+                ground_quality["gate_ground_contact_pass"]
+                and export_stats["tracker_ground_contact_pass"]
+            ),
         }
         metadata = {
             "provenance": provenance,

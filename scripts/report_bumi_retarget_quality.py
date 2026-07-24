@@ -180,12 +180,13 @@ def build_report(
         "gate_position_pass",
         "gate_foot_position_pass",
         "gate_orientation_pass",
+        "gate_ground_contact_pass",
     )
     gate_failures = {
         key: [
             record["source_relative_path"]
             for record in records
-            if not bool(record[key])
+            if not bool(record.get(key, True))
         ]
         for key in gate_keys
     }
@@ -236,7 +237,7 @@ def build_report(
     )
 
     def geometry_pass(record: dict[str, Any]) -> bool:
-        return all(bool(record[key]) for key in gate_keys)
+        return all(bool(record.get(key, True)) for key in gate_keys)
 
     def conservative_dynamics_pass(record: dict[str, Any]) -> bool:
         return bool(
@@ -332,6 +333,55 @@ def build_report(
         "max_p95_low_ankle_horizontal_speed_mps": max(
             (
                 record["p95_low_ankle_horizontal_speed_mps"]
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_abs_ground_requested_root_z_offset_m": max(
+            (
+                abs(record.get("ground_requested_root_z_offset_m", 0.0))
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_abs_ground_applied_root_z_offset_m": max(
+            (
+                abs(record.get("ground_applied_root_z_offset_m", 0.0))
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "ground_alignment_clipped": sum(
+            bool(record.get("ground_alignment_clipped", False))
+            for record in records
+        ),
+        "min_foot_contact_height_after_m": min(
+            (
+                record.get("min_foot_contact_height_after_m", 0.0)
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_foot_contact_below_ground_fraction_after": max(
+            (
+                record.get("foot_contact_below_ground_fraction_after", 0.0)
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "min_tracker_foot_contact_height_m": min(
+            (
+                record.get("tracker_min_foot_contact_height_m", 0.0)
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_tracker_foot_contact_below_ground_fraction": max(
+            (
+                record.get(
+                    "tracker_foot_contact_below_ground_fraction",
+                    0.0,
+                )
                 for record in records
             ),
             default=0.0,

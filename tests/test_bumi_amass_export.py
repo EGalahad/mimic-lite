@@ -13,6 +13,8 @@ from scipy.spatial.transform import Rotation as R
 from mimic_lite_conversion.bumi import (
     BUMI_BODY_NAMES,
     BUMI_MOTION_JOINT_NAMES,
+    align_bumi_qpos_to_ground,
+    bumi_foot_contact_heights,
     export_bumi_tracking_npz,
     nominal_bumi_qpos,
     resample_bumi_qpos,
@@ -89,6 +91,25 @@ class BumiAmassExportTest(unittest.TestCase):
                 arrays = {name: np.asarray(payload[name]) for name in payload.files}
 
         self.assertEqual(stats["frames"], 6)
+        target_times, target_qpos = resample_bumi_qpos(
+            self.model,
+            timestamps,
+            qpos,
+            target_fps=50.0,
+        )
+        target_contact_height = bumi_foot_contact_heights(
+            self.model,
+            target_qpos,
+        ).min(axis=1)
+        self.assertAlmostEqual(
+            stats["tracker_min_foot_contact_height_m"],
+            float(target_contact_height.min()),
+        )
+        self.assertAlmostEqual(
+            stats["tracker_foot_contact_below_ground_fraction"],
+            float(np.mean(target_contact_height < 0.0)),
+        )
+        np.testing.assert_allclose(target_times, np.arange(6) / 50.0)
         self.assertEqual(arrays["joint_pos"].shape, (6, 21))
         self.assertEqual(arrays["body_pos_w"].shape, (6, 23, 3))
         np.testing.assert_array_equal(arrays["body_pos_w"][:, 0], 0.0)
@@ -141,6 +162,81 @@ class BumiAmassExportTest(unittest.TestCase):
             # floating-point error when translation and yaw change together.
             atol=3.0e-5,
         )
+
+    def test_ground_alignment_is_one_constant_vertical_translation(self) -> None:
+        qpos = np.repeat(nominal_bumi_qpos(self.model)[None, :], 5, axis=0)
+        vertical_motion = np.asarray([0.0, 0.02, 0.08, 0.03, 0.0])
+        qpos[:, 2] += vertical_motion - 0.025
+        source_heights = bumi_foot_contact_heights(self.model, qpos)
+
+        aligned, stats = align_bumi_qpos_to_ground(
+            self.model,
+            qpos,
+            reference_percentile=0.0,
+            target_foot_contact_height_m=0.002,
+            max_abs_offset_m=0.05,
+        )
+        aligned_heights = bumi_foot_contact_heights(self.model, aligned)
+
+        self.assertFalse(stats["ground_alignment_clipped"])
+        self.assertTrue(stats["gate_ground_contact_pass"])
+        self.assertAlmostEqual(float(aligned_heights.min()), 0.002)
+        np.testing.assert_allclose(
+            aligned[:, 2] - qpos[:, 2],
+            stats["ground_applied_root_z_offset_m"],
+        )
+        np.testing.assert_allclose(np.diff(aligned[:, 2]), np.diff(qpos[:, 2]))
+        np.testing.assert_allclose(aligned[:, :2], qpos[:, :2])
+        np.testing.assert_allclose(aligned[:, 3:], qpos[:, 3:])
+        np.testing.assert_allclose(
+            aligned_heights - source_heights,
+            stats["ground_applied_root_z_offset_m"],
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            export_stats = export_bumi_tracking_npz(
+                Path(temp_dir) / "aligned.npz",
+                model_path=self.model_path,
+                source_timestamps_s=np.arange(len(aligned)) / 50.0,
+                source_qpos=aligned,
+                target_fps=50.0,
+            )
+        self.assertTrue(export_stats["tracker_ground_contact_pass"])
+
+    def test_contact_height_catches_tilted_sole_below_center_site(self) -> None:
+        qpos = nominal_bumi_qpos(self.model)
+        ankle_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            "l_ankle_pitch_joint",
+        )
+        qpos[self.model.jnt_qposadr[ankle_id]] = -0.96
+        data = mujoco.MjData(self.model)
+        data.qpos[:] = qpos
+        mujoco.mj_forward(self.model, data)
+        site_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_SITE,
+            "l_foot",
+        )
+        center_site_height = float(data.site_xpos[site_id, 2])
+        contact_height = float(
+            bumi_foot_contact_heights(self.model, qpos[None, :])[0, 0]
+        )
+        self.assertGreater(center_site_height, 0.03)
+        self.assertLess(contact_height, -0.03)
+
+    def test_ground_alignment_clips_large_bad_offset_and_fails_gate(self) -> None:
+        qpos = np.repeat(nominal_bumi_qpos(self.model)[None, :], 3, axis=0)
+        qpos[:, 2] -= 0.20
+        aligned, stats = align_bumi_qpos_to_ground(
+            self.model,
+            qpos,
+            reference_percentile=0.0,
+            max_abs_offset_m=0.05,
+        )
+        self.assertTrue(stats["ground_alignment_clipped"])
+        self.assertFalse(stats["gate_ground_contact_pass"])
+        np.testing.assert_allclose(aligned[:, 2] - qpos[:, 2], 0.05)
 
 
 if __name__ == "__main__":

@@ -90,6 +90,45 @@ BUMI_MOTION_BODY_NAMES = ("motion_root", *BUMI_BODY_NAMES)
 TARGET_TRACKER_FPS = 50.0
 BUMI_ROOT_LINEAR_VELOCITY_LIMIT = 3.0
 BUMI_ROOT_ANGULAR_VELOCITY_LIMIT = 6.0
+BUMI_FOOT_CONTACT_GEOM_NAMES = (
+    (
+        "l_foot_contact_0_geom",
+        "l_foot_contact_1_geom",
+        "l_foot_contact_2_geom",
+        "l_foot_contact_3_geom",
+        "l_foot1_collision",
+        "l_foot2_collision",
+        "l_foot3_collision",
+        "l_foot4_collision",
+        "l_foot5_collision",
+        "l_foot6_collision",
+        "l_foot7_collision",
+    ),
+    (
+        "r_foot_contact_0_geom",
+        "r_foot_contact_1_geom",
+        "r_foot_contact_2_geom",
+        "r_foot_contact_3_geom",
+        "r_foot1_collision",
+        "r_foot2_collision",
+        "r_foot3_collision",
+        "r_foot4_collision",
+        "r_foot5_collision",
+        "r_foot6_collision",
+        "r_foot7_collision",
+    ),
+)
+
+# Use the physical collision sole rather than the ankle body or center foot
+# site: a pitched foot can have its center above Z=0 while its toe or heel is
+# visibly below the floor.  A low, robust percentile keeps one bad IK frame
+# from lifting an otherwise usable clip.  Applying one root-Z offset to the
+# whole clip preserves every vertical displacement, velocity and jump height.
+BUMI_GROUND_REFERENCE_PERCENTILE = 0.1
+BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M = 0.002
+BUMI_GROUND_MAX_ABS_OFFSET_M = 0.05
+BUMI_GROUND_MAX_PENETRATION_M = 0.005
+BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION = 0.002
 
 # Conservative v1 dataset gates.  These are deliberately stricter than some
 # actuator limits: a clip may be physically rate-limited yet still be too
@@ -217,6 +256,163 @@ def nominal_bumi_qpos(model: mujoco.MjModel) -> np.ndarray:
         [BUMI_NOMINAL_JOINT_POS.get(name, 0.0) for name in BUMI_POLICY_JOINT_NAMES]
     )
     return qpos
+
+
+def bumi_foot_contact_heights(
+    model: mujoco.MjModel,
+    qpos: np.ndarray,
+) -> np.ndarray:
+    """Return the lowest collision-sole world Z for each foot and frame."""
+
+    validate_bumi_model(model)
+    qpos = np.asarray(qpos, dtype=np.float64)
+    if qpos.ndim != 2 or qpos.shape[1] != model.nq:
+        raise ValueError(f"Expected qpos shape (frames, {model.nq}), got {qpos.shape}")
+    if qpos.shape[0] == 0:
+        raise ValueError("qpos must contain at least one frame")
+    if not np.all(np.isfinite(qpos)):
+        raise ValueError("qpos contains non-finite values")
+
+    foot_geoms: list[list[tuple[int, int, float, float]]] = []
+    for names in BUMI_FOOT_CONTACT_GEOM_NAMES:
+        geoms = []
+        for name in names:
+            geom_id = mujoco.mj_name2id(
+                model,
+                mujoco.mjtObj.mjOBJ_GEOM,
+                name,
+            )
+            if geom_id < 0:
+                raise ValueError(f"Bumi model is missing foot contact geom {name!r}")
+            geom_type = int(model.geom_type[geom_id])
+            if geom_type == mujoco.mjtGeom.mjGEOM_SPHERE:
+                half_length = 0.0
+            elif geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
+                half_length = float(model.geom_size[geom_id, 1])
+            else:
+                raise ValueError(
+                    f"Unsupported foot contact geom type for {name!r}: {geom_type}"
+                )
+            geoms.append(
+                (
+                    geom_id,
+                    geom_type,
+                    float(model.geom_size[geom_id, 0]),
+                    half_length,
+                )
+            )
+        foot_geoms.append(geoms)
+
+    heights = np.empty((qpos.shape[0], 2), dtype=np.float64)
+    data = mujoco.MjData(model)
+    for frame_idx, pose in enumerate(qpos):
+        data.qpos[:] = pose
+        mujoco.mj_forward(model, data)
+        for foot_idx, geoms in enumerate(foot_geoms):
+            lowest = np.inf
+            for geom_id, geom_type, radius, half_length in geoms:
+                height = float(data.geom_xpos[geom_id, 2]) - radius
+                if geom_type == mujoco.mjtGeom.mjGEOM_CAPSULE:
+                    rotation = data.geom_xmat[geom_id].reshape(3, 3)
+                    height -= abs(float(rotation[2, 2])) * half_length
+                lowest = min(lowest, height)
+            heights[frame_idx, foot_idx] = lowest
+    return heights
+
+
+def align_bumi_qpos_to_ground(
+    model: mujoco.MjModel,
+    qpos: np.ndarray,
+    *,
+    reference_percentile: float = BUMI_GROUND_REFERENCE_PERCENTILE,
+    target_foot_contact_height_m: float = (
+        BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M
+    ),
+    max_abs_offset_m: float = BUMI_GROUND_MAX_ABS_OFFSET_M,
+) -> tuple[np.ndarray, dict[str, float | bool]]:
+    """Apply one bounded root-Z translation to align a clip with world Z=0.
+
+    The reference is computed from the lower physical collision sole in each
+    frame, including toe/heel effects from foot pitch and roll.  No per-frame
+    foot locking is performed: the returned motion differs from the input by
+    one constant vertical translation only.
+    """
+
+    if (
+        not np.isfinite(reference_percentile)
+        or reference_percentile < 0.0
+        or reference_percentile > 100.0
+    ):
+        raise ValueError(
+            "reference_percentile must be finite and in [0, 100], got "
+            f"{reference_percentile}"
+        )
+    if not np.isfinite(target_foot_contact_height_m):
+        raise ValueError(
+            "target_foot_contact_height_m must be finite, got "
+            f"{target_foot_contact_height_m}"
+        )
+    if not np.isfinite(max_abs_offset_m) or max_abs_offset_m <= 0.0:
+        raise ValueError(
+            f"max_abs_offset_m must be finite and positive, got {max_abs_offset_m}"
+        )
+
+    source = np.asarray(qpos, dtype=np.float64)
+    foot_contact_heights = bumi_foot_contact_heights(model, source)
+    minimum_foot_height = foot_contact_heights.min(axis=1)
+    reference_before = float(
+        np.percentile(minimum_foot_height, reference_percentile)
+    )
+    requested_offset = float(target_foot_contact_height_m - reference_before)
+    applied_offset = float(
+        np.clip(requested_offset, -max_abs_offset_m, max_abs_offset_m)
+    )
+    alignment_clipped = not np.isclose(
+        requested_offset,
+        applied_offset,
+        atol=1.0e-12,
+        rtol=0.0,
+    )
+
+    aligned = source.copy()
+    aligned[:, 2] += applied_offset
+    minimum_foot_height_after = minimum_foot_height + applied_offset
+    below_ground_before = float(np.mean(minimum_foot_height < 0.0))
+    below_ground_after = float(np.mean(minimum_foot_height_after < 0.0))
+    below_penetration_limit_after = float(
+        np.mean(
+            minimum_foot_height_after
+            < -BUMI_GROUND_MAX_PENETRATION_M
+        )
+    )
+    minimum_after = float(minimum_foot_height_after.min())
+    gate_pass = bool(
+        not alignment_clipped
+        and minimum_after >= -BUMI_GROUND_MAX_PENETRATION_M
+        and below_ground_after
+        <= BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION
+    )
+    return aligned, {
+        "ground_alignment_reference_percentile": float(reference_percentile),
+        "ground_target_foot_contact_height_m": float(
+            target_foot_contact_height_m
+        ),
+        "ground_reference_foot_contact_height_before_m": reference_before,
+        "ground_reference_foot_contact_height_after_m": float(
+            reference_before + applied_offset
+        ),
+        "ground_requested_root_z_offset_m": requested_offset,
+        "ground_applied_root_z_offset_m": applied_offset,
+        "ground_alignment_clipped": bool(alignment_clipped),
+        "min_foot_contact_height_before_m": float(minimum_foot_height.min()),
+        "min_foot_contact_height_after_m": minimum_after,
+        "foot_contact_below_ground_fraction_before": below_ground_before,
+        "foot_contact_below_ground_fraction_after": below_ground_after,
+        "foot_contact_below_minus_5mm_fraction_after": (
+            below_penetration_limit_after
+        ),
+        "gate_ground_contact_pass": gate_pass,
+    }
 
 
 def _normalize_continuous_quaternions_wxyz(quaternions: np.ndarray) -> np.ndarray:
@@ -432,7 +628,7 @@ def export_bumi_tracking_npz(
     source_timestamps_s: np.ndarray,
     source_qpos: np.ndarray,
     target_fps: float = TARGET_TRACKER_FPS,
-) -> Mapping[str, float | int | str]:
+) -> Mapping[str, float | int | str | bool]:
     model_path = Path(model_path).expanduser().resolve()
     model = mujoco.MjModel.from_xml_path(str(model_path))
     target_times, target_qpos = resample_bumi_qpos(
@@ -442,6 +638,28 @@ def export_bumi_tracking_npz(
         target_fps=target_fps,
     )
     arrays = materialize_bumi_tracking_motion(model, target_qpos, target_times)
+    tracker_foot_contact_height = bumi_foot_contact_heights(
+        model,
+        target_qpos,
+    ).min(axis=1)
+    tracker_below_ground_fraction = float(
+        np.mean(tracker_foot_contact_height < 0.0)
+    )
+    tracker_below_penetration_limit_fraction = float(
+        np.mean(
+            tracker_foot_contact_height
+            < -BUMI_GROUND_MAX_PENETRATION_M
+        )
+    )
+    tracker_minimum_foot_contact_height = float(
+        tracker_foot_contact_height.min()
+    )
+    tracker_ground_contact_pass = bool(
+        tracker_minimum_foot_contact_height
+        >= -BUMI_GROUND_MAX_PENETRATION_M
+        and tracker_below_ground_fraction
+        <= BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION
+    )
     rounded_fps = int(round(target_fps))
     if not np.isclose(target_fps, rounded_fps):
         raise ValueError(f"Tracking NPZ requires integer FPS, got {target_fps}")
@@ -478,4 +696,14 @@ def export_bumi_tracking_npz(
         "source_duration_s": source_duration,
         "target_duration_s": target_duration,
         "duration_drift_s": target_duration - source_duration,
+        "tracker_min_foot_contact_height_m": (
+            tracker_minimum_foot_contact_height
+        ),
+        "tracker_foot_contact_below_ground_fraction": (
+            tracker_below_ground_fraction
+        ),
+        "tracker_foot_contact_below_minus_5mm_fraction": (
+            tracker_below_penetration_limit_fraction
+        ),
+        "tracker_ground_contact_pass": tracker_ground_contact_pass,
     }

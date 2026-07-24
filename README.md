@@ -279,6 +279,45 @@ training gate:
 - total: 1,983/1,983 clips and 1,630,534 final 50 Hz frames, with zero
   conversion rejects, missing clips, stale metadata, or train/val overlap.
 
+##### Ground alignment (pipeline v3)
+
+The counts above describe the completed pipeline-v2 corpus. Pipeline v3 fixes
+two independent sources of Bumi feet appearing below the Viser ground:
+
+1. GMR now scales the absolute pelvis translation with the mean left/right foot
+   reach, instead of the much shorter torso ratio. With GMR's root-relative
+   point scaling, using the torso ratio drove otherwise valid foot targets
+   below Z=0.
+2. After IK, the converter measures the lowest point of all 22 MuJoCo
+   sphere/capsule foot collision geoms. It translates the entire clip once in Z
+   so the 0.1 percentile is 2 mm above the floor. The correction is capped at
+   ±5 cm; clipping or residual penetration fails `gate_ground_contact_pass`.
+
+This is not per-frame foot snapping. Every frame receives exactly the same
+translation, so jump height, root-Z differences and vertical velocities are
+unchanged. The final 50 Hz motion is checked again after interpolation, and
+both native- and tracker-timeline measurements are stored in metadata and the
+quality report.
+
+On the same ten CMU clips used for the visual A/B, the final 50 Hz Bumi mesh
+went from 28.45% of frames with some visible sole below Z=0 to 0.094%; no frame
+was more than 5 mm below ground. The per-clip root correction was
+1.6–4.6 cm, no correction hit the cap, all ten ground gates passed, and the
+existing dynamics/geometry grouping was otherwise unchanged.
+
+Pipeline v3 intentionally invalidates pipeline-v2 `--resume` entries. Re-run
+the train/val conversion, quality report and staging commands above before
+using the full AMASS corpus for a new training run. A checked ten-clip result is
+available for visual review now:
+
+```bash
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run --with mjviser==0.0.14 \
+  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
+  --motion-dir \
+  .cache/mimic-lite/retarget/bumi/amass/ground_collision_aligned_10/tracker_50hz
+```
+
 The raw HumanPose24, native GMR qpos, final tracker NPZ, metadata, and review
 sets remain under `$RETARGET_ROOT/{train,val}`. The default staging deliberately
 contains only `automatic_training_ready_clip_ids`: train has 1,029 clips /
