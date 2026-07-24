@@ -329,30 +329,46 @@ p05 is -10.3 mm, and double-support low/high-foot median bounds are
 -4.2/+10.5 mm. These are read-only FK/contact measurements; no output
 postprocessing is hidden behind them.
 
-Pipeline v4 invalidates pipeline-v2/v3 `--resume` entries. The 1,983-clip counts
-and staging counts in this README remain historical pipeline-v2 results until
-train/val are reconverted and re-reported with v4. The checked flat-walk pilot
-is available for visual review:
+Pipeline v4 invalidates pipeline-v2/v3 `--resume` entries. A complete,
+isolated v4 conversion finished on 2026-07-24 under
+`$RETARGET_ROOT/v4/{train,val}`:
+
+| split | converted | native frames | tracker frames | automatic | geometry review | dynamics review |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| train | 1,787/1,787 | 3,188,842 | 1,513,690 | 316 | 1,072 | 399 |
+| val | 196/196 | 262,893 | 116,844 | 27 | 130 | 39 |
+
+Both reports have `pipeline_integrity_ready=true`, zero conversion rejects,
+missing clips, stale metadata, temporary files, or train/val overlap. The
+Viser loader independently validated all 1,983 final NPZs and all 1,630,534
+tracker frames.
+
+The conservative flat-ground/geometry gates do not pass the entire generic
+CMU catalog: it contains non-flat, crouched, seated, prone, acrobatic, and
+otherwise non-walking motions. A review label is not a conversion failure; all
+four artifacts for every clip are retained. The reports deliberately remain
+`production_ready=false` until a training-selection policy is chosen rather
+than silently treating every non-flat motion as bad retargeting.
+
+Browse the complete v4 train conversion, including world-space root motion,
+with:
 
 ```bash
 PYTHONPATH=projects/mimic-lite \
 uv --project venv/mjlab run --with mjviser==0.0.14 \
   python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
   --motion-dir \
-  .cache/mimic-lite/retarget/bumi/amass/flat_walk_v4_10/tracker_50hz
+  .cache/mimic-lite/retarget/bumi/amass/v4/train/tracker_50hz \
+  --no-recenter-root-xy
 ```
 
 The raw HumanPose24, native GMR qpos, final tracker NPZ, metadata, and review
-sets remain under `$RETARGET_ROOT/{train,val}`. The default staging deliberately
-contains only `automatic_training_ready_clip_ids`: train has 1,029 clips /
-774,163 frames and val has 121 clips / 80,738 frames. The remaining 436
-geometry-review + 322 dynamics-review train clips and 38 + 37 val clips are
-retained for replay/review rather than silently discarded or automatically
-trained.
-
-AMASS-only, held-out val, and the AMASS + original 36-gait mixture have each
-completed a 16-env, one-update GPU smoke on these production files. The
-candidate mixture samples AMASS at 0.8 and the original 36 gait clips at 0.2.
+sets are under `$RETARGET_ROOT/v4/{train,val}`. The v4 automatic groups contain
+286,150 train frames / 95.4 minutes and 27,921 val frames / 9.3 minutes. The
+existing default staging and its AMASS-only/mixture smoke results still refer
+to pipeline v2; they were intentionally not overwritten. Before the next
+training run, choose whether to stage only the 343 automatic clips or curate
+appropriate review motions by action/terrain semantics.
 
 ##### Browse the retargeted motions with Viser
 
@@ -361,14 +377,15 @@ synchronized views: the Bumi MuJoCo mesh, the original SMPL-X FK source motion
 as its 24 selected joints (purple/green), and an optional final Bumi FK debug
 overlay (blue/orange). The 24 source positions are saved before GMR/IK and are
 sampled for display by timestamp, so no 30 Hz assumption or frame-index
-matching is introduced. By default the viewer opens the full production train
-catalog and infers both its quality report and the sibling `human_pose24`
-directory:
+matching is introduced. Pass the v4 motion directory explicitly so the viewer
+infers its quality report and sibling `human_pose24` directory:
 
 ```bash
 PYTHONPATH=projects/mimic-lite \
 uv --project venv/mjlab run --with mjviser==0.0.14 \
-  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py
+  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
+  --motion-dir \
+  .cache/mimic-lite/retarget/bumi/amass/v4/train/tracker_50hz
 ```
 
 Open `http://localhost:8090`. The GUI provides clip selection, previous/next,

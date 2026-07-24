@@ -989,6 +989,56 @@ uv --project venv/mjlab run --with mjviser==0.0.14 \
   .cache/mimic-lite/retarget/bumi/amass/flat_walk_v4_10/tracker_50hz
 ~~~
 
-全量 1,983 条数据的既有数字仍属于 pipeline v2。下一次正式训练前必须按 v4
-重新转换 train/val、重新生成 quality report 和 staging；不能把旧 corpus 标记成
-已经获得 online/offline 高度 parity。
+### 12.8 v4 全量转换结果
+
+2026-07-24 已在不覆盖 pipeline-v2 产物的前提下完成全量转换：
+
+~~~text
+.cache/mimic-lite/retarget/bumi/amass/v4/
+  train/
+    human_pose24/
+    native_qpos/
+    tracker_50hz/
+    metadata/
+    reports/
+  val/
+    ...
+~~~
+
+结果：
+
+| split | converted | native frames | tracker frames | automatic | geometry review | dynamics review |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| train | 1,787/1,787 | 3,188,842 | 1,513,690 | 316 | 1,072 | 399 |
+| val | 196/196 | 262,893 | 116,844 | 27 | 130 | 39 |
+
+完整性检查：
+
+- 总计 1,983/1,983 clips、1,630,534 个 50 Hz frames，conversion reject 为 0；
+- 每个 split 的 `human_pose24/native_qpos/tracker_50hz/metadata` 文件数均与
+  manifest 完全一致；
+- `missing_clip_ids`、`stale_metadata_clip_ids`、integrity failure 和临时文件
+  均为 0；
+- train/val clip id 交集为 0；
+- 所有 metadata 均为 pipeline version 4、`actual_human_height=1.6`，并记录
+  GMR commit `1093e91561c3645841a18bb64d4ba442ba9b66fb`；
+- Viser dry-run 独立加载并校验了 1,787 条 train 和 196 条 val NPZ。
+
+质量分组需要与“转换成功”分开理解。CMU 全量数据包含非平地、坐/卧、杂技和大幅
+动作，而当前 ground gate 是按平地 contact 语义设计的。因此两份报告的
+`pipeline_integrity_ready=true`，但 `production_ready=false`；review clip 仍完整
+保留，不能仅因它没有通过平地 gate 就认定 GMR 转换失败。
+
+当前 v4 automatic 集合为：
+
+- train：316 clips、286,150 frames、约 95.4 分钟；
+- val：27 clips、27,921 frames、约 9.3 分钟。
+
+既有 `.cache/mimic-lite/motions/bumi/amass_gmr*` staging 仍属于 pipeline v2，
+本次没有静默覆盖。开始下一轮正式训练前，需要明确选择：
+
+1. 只 stage 343 条 automatic clip；或
+2. 按动作/地形语义审查 review 集，再纳入可用动作。
+
+不能把所有非平地动作强行通过平地 foot-height gate，也不能在未说明的情况下把
+旧 v2 staging 当作 v4 训练集。
