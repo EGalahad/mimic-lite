@@ -172,7 +172,7 @@ mimic-lite 的 v1 实现及测试关闭，第 7 项的 clean configs/smoke 已�
 执行时使用：
 
 ~~~bash
-AA_ROOT=/data/jun7.shi/code/swe_codex/active-adaptation
+AA_ROOT=/data/jun7.shi/code/poc/github/EGalahad/active-adaptation
 MIMIC_ROOT=$AA_ROOT/projects/mimic-lite
 UNILAB_ROOT=/data/jun7.shi/code/poc/github/UniLab
 GMR_ROOT=$UNILAB_ROOT/thirdparty/GMR
@@ -187,9 +187,9 @@ TRACKER_DATA_ROOT=$AA_ROOT/.cache/mimic-lite/motions/bumi/amass_gmr
 
 | owner | 负责内容 | 不负责内容 |
 | --- | --- | --- |
-| GMR | HumanPose24 contract、SMPL-X adapter、Bumi kinematic model、`xrobot_to_bumi` IK 配置和纯 retarget API | MimicLite NPZ/训练配置 |
+| GMR | HumanPose24 contract、SMPL-X adapter、Bumi kinematic model、`xrobot_to_bumi` IK、AMASS collection orchestration、50 Hz MimicLite exporter 和质量报告 | MimicLite 训练/staging 配置 |
 | sim2real | Pico wire/timestamp、Bumi `RobotCfg`、在线 publisher 选择 Bumi、online/offline parity fixture | AMASS 批处理和训练数据打包 |
-| mimic-lite | AMASS batch orchestration、50 Hz Bumi exporter、质量报告、motion config、训练/eval | 重新实现 GMR IK |
+| mimic-lite | GMR 旧入口兼容、motion staging/config、训练/eval 和 Viser 检查 | 重新实现 GMR IK 或维护第二份离线 exporter |
 | robot_retargeter | 不作为主要方案依据；最多只核对已有 Bumi constraint | 不作为本链路 runtime；不复制其 bidirectional/zero-phase 行为 |
 
 实施前必须再次记录四个 repo 的 commit 和 dirty state。当前 `robot_retargeter` worktree 含其他任务的未提交改动，本计划不能在该 worktree 上继续叠加修改；GMR 改动应在其独立干净分支完成。
@@ -207,6 +207,7 @@ TRACKER_DATA_ROOT=$AA_ROOT/.cache/mimic-lite/motions/bumi/amass_gmr
 | `general_motion_retargeting/utils/smplx_to_human_pose24.py` | 新增 | SMPL-X joint/frame mapping 和 quaternion frame correction |
 | `general_motion_retargeting/params.py` | 修改 | 注册 Bumi XML、root、camera 和 `xrobot→bumi` config |
 | `general_motion_retargeting/ik_configs/xrobot_to_bumi.json` | 新增 | Pico/AMASS 共用的 Bumi IK task |
+| `general_motion_retargeting/integrations/mimic_lite/` | 新增 | AMASS 自动发现/manifest/batch、Bumi 50 Hz NPZ 和质量分组的 owner |
 | `assets/bumi/bumi_mocap.xml` | 新增 | 无大型 mesh 的 Bumi kinematic MJCF，frame/link/joint 必须与 tracker 模型一致 |
 | `tests/test_human_pose24.py` | 新增 | schema、native timeline、quaternion 和坐标约定 |
 | `tests/test_xrobot_to_bumi.py` | 新增 | Bumi registry、joint limits、静态 pose 和连续 frame IK |
@@ -226,9 +227,9 @@ TRACKER_DATA_ROOT=$AA_ROOT/.cache/mimic-lite/motions/bumi/amass_gmr
 
 | 文件 | 操作 | 目的 |
 | --- | --- | --- |
-| `mimic_lite_conversion/bumi.py` | 新增 | qpos time resample、MuJoCo FK/velocity、tracking NPZ contract |
-| `mimic_lite_conversion/amass_gmr.py` | 新增 | manifest、resume、cache、diagnostics 和 batch orchestration |
-| `scripts/convert_amass_to_bumi_tracker.py` | 新增 | 薄 CLI；业务规则留在模块内 |
+| `mimic_lite_conversion/bumi.py` | 兼容转发 | 转发到 GMR owner，保留 viewer/staging 的旧 import |
+| `mimic_lite_conversion/amass_gmr.py` | 兼容转发 | 转发到 GMR owner，保留旧 manifest 级命令 |
+| `scripts/convert_amass_to_bumi_tracker.py` | 兼容 CLI | 复现已有 CMU split；新的 collection 入口在 GMR |
 | `scripts/prepare_bumi_motion_dataset.py` | 小改 | 支持明确的 split/input manifest，同时继续强校验最终 50 Hz |
 | `cfg/task/motion/bumi/amass_gmr.yaml` | 新增 | AMASS-only train dataset |
 | `cfg/task/motion/bumi/amass_gmr_val.yaml` | 新增 | held-out eval dataset |
@@ -1042,3 +1043,71 @@ uv --project venv/mjlab run --with mjviser==0.0.14 \
 
 不能把所有非平地动作强行通过平地 foot-height gate，也不能在未说明的情况下把
 旧 v2 staging 当作 v4 训练集。
+
+## 13. GMR collection 入口与多子数据集扩展
+
+状态（2026-07-25）：离线链路的 owner 已从 mimic-lite 收拢到
+`GMR/general_motion_retargeting/integrations/mimic_lite/`。mimic-lite 的
+`mimic_lite_conversion` 和旧 quality CLI 只保留兼容转发，训练侧仍负责 staging、
+motion config、训练和评估。GMR owner 提交为
+`5f2631e10a8ec30c6a92daf492cfa92e3f4aa135`。
+
+新的 collection 入口有以下约束：
+
+1. 每次启动先对 AMASS 根目录做一次稳定路径快照，按一级目录识别 dataset；
+2. 只接收 `*_stageii.npz`，不会把 `stagei` 人体 shape 文件当动作；
+3. `--dataset` 精确匹配并可重复；省略时转换快照中的全部 dataset；
+4. 写 combined 和 per-dataset manifest、source reject、inventory、转换报告和质量分组；
+5. `--resume` 同时检查 source/config/code/output provenance；新增子数据集后可用同一
+   命令续跑；
+6. 全部 dataset 共用一个 output root，clip id 含 dataset/subject/sequence，不需要
+   在训练前再拼接多个转换目录。
+
+从 `active-adaptation` 根目录运行完整 AMASS：
+
+~~~bash
+export GMR_ROOT=/data/jun7.shi/code/poc/github/UniLab/thirdparty/GMR
+export AMASS_ROOT=/data/jun7.shi/datasets/AMASS/AMASS
+export SMPLX_MODEL_DIR=/data/jun7.shi/code/poc/hr/HoloMotion/thirdparties/smpl_models/models
+export BUMI_MJCF="$PWD/.cache/aa-robot-models/bumi/bumi.xml"
+export RETARGET_ROOT="$PWD/.cache/mimic-lite/retarget/bumi/amass"
+
+PYTHONPATH="$GMR_ROOT" \
+uv --project venv/mjlab run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python -m general_motion_retargeting.integrations.mimic_lite.amass_cli \
+  --amass-root "$AMASS_ROOT" \
+  --smplx-model-dir "$SMPLX_MODEL_DIR" \
+  --bumi-mjcf "$BUMI_MJCF" \
+  --output "$RETARGET_ROOT/gmr_all" \
+  --actual-human-height 1.6 --target-fps 50 \
+  --workers 16 --torch-threads-per-worker 2 \
+  --resume --fail-on-reject
+~~~
+
+`--limit-per-dataset 1` 只用于快速 smoke，正式全量命令不得带该参数。若 AMASS
+仍在复制，等复制完成后再启动正式 run；已经启动过也可重跑，同一 output root 会
+把新文件加入 manifest 并保留 provenance 仍有效的缓存。
+
+Transitions 全量验证结果：
+
+| dataset | clips | native FPS/frames | tracker frames | automatic | geometry | dynamics | reject/integrity failure |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Transitions | 110 | 120 Hz / 108,688 | 45,303 | 25 | 44 | 41 | 0 / 0 |
+
+该结果验证的是多 dataset discovery、stage-II schema、统一入口、并行 GMR、50 Hz
+export 和质量报告闭环。`production_ready=false` 来自保守的 geometry/dynamics
+分流，不表示 85 条 review motion 转换失败；所有 110 条仍保存在产物中。
+
+完整目录 inventory-only 预检的当前快照为 6 个 dataset、8,476 个 stage-II 文件。
+其中 8,475 条 schema/hash 检查通过，1 条源文件损坏：
+
+~~~text
+BMLmovi/Subject_49_F_MoSh/Subject_49_F_19_stageii.npz
+BadZipFile: File is not a zip file
+~~~
+
+`unzip -t` 进一步确认该文件缺少 ZIP central directory，大小恰好为 5 MiB，符合
+复制/下载被截断的特征。正式全量转换尚未启动；先从数据源重新复制这一条，再运行
+上面的 `--fail-on-reject` 命令。不要为了绕过预检而把损坏文件静默排除。

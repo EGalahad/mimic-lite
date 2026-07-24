@@ -141,7 +141,54 @@ export BUMI_MJCF="$PWD/.cache/aa-robot-models/bumi/bumi.xml"
 export RETARGET_ROOT="$PWD/.cache/mimic-lite/retarget/bumi/amass"
 ```
 
-Build SHA256-addressed manifests with a deterministic subject-level train/val
+The canonical collection entry now lives in GMR's
+`general_motion_retargeting/integrations/mimic_lite` directory. It discovers
+new AMASS top-level datasets automatically, accepts only `*_stageii.npz`, writes
+one exact combined manifest, converts every selected clip, and generates the
+quality report in the same invocation. For example, validate Transitions with:
+
+```bash
+PYTHONPATH="$GMR_ROOT" \
+uv --project venv/mjlab run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python -m general_motion_retargeting.integrations.mimic_lite.amass_cli \
+  --amass-root "$AMASS_ROOT" --dataset Transitions \
+  --smplx-model-dir "$SMPLX_MODEL_DIR" --bumi-mjcf "$BUMI_MJCF" \
+  --output "$RETARGET_ROOT/gmr_transitions" \
+  --actual-human-height 1.6 --target-fps 50 \
+  --workers 16 --torch-threads-per-worker 2 \
+  --resume --fail-on-reject
+```
+
+The tested Transitions run converted 110/110 clips and 108,688 native frames
+into 45,303 tracker frames with zero rejects or integrity failures. Its
+conservative groups are 25 automatic, 44 geometry review and 41 dynamics
+review; review clips remain in the conversion output.
+
+To convert the complete current AMASS directory, omit `--dataset`:
+
+```bash
+PYTHONPATH="$GMR_ROOT" \
+uv --project venv/mjlab run \
+  --with smplx --with mink --with loop-rate-limiters \
+  --with 'qpsolvers[daqp]' \
+  python -m general_motion_retargeting.integrations.mimic_lite.amass_cli \
+  --amass-root "$AMASS_ROOT" \
+  --smplx-model-dir "$SMPLX_MODEL_DIR" --bumi-mjcf "$BUMI_MJCF" \
+  --output "$RETARGET_ROOT/gmr_all" \
+  --actual-human-height 1.6 --target-fps 50 \
+  --workers 16 --torch-threads-per-worker 2 \
+  --resume --fail-on-reject
+```
+
+The command is safe to rerun after adding another subdataset: `--resume`
+checks source/config/code/output provenance and converts only new or stale
+clips. Add `--limit-per-dataset 1` only for a smoke test.
+
+The older manifest-level commands below remain as compatibility entry points
+for reproducing the existing CMU train/validation split. Build
+SHA256-addressed manifests with a deterministic subject-level train/val
 split. The checked local CMU inventory contains 1,983 clips: 1,787 train and
 196 held out, with no rejected source files.
 
