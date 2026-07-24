@@ -29,17 +29,14 @@ import numpy as np
 
 from .bumi import (
     BUMI_FOOT_CONTACT_GEOM_NAMES,
-    BUMI_GROUND_MAX_ABS_OFFSET_M,
     BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION,
     BUMI_GROUND_MAX_PENETRATION_M,
-    BUMI_GROUND_REFERENCE_PERCENTILE,
-    BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M,
     BUMI_JOINT_VELOCITY_LIMITS,
     BUMI_POLICY_JOINT_NAMES,
     BUMI_ROOT_ANGULAR_VELOCITY_LIMIT,
     BUMI_ROOT_LINEAR_VELOCITY_LIMIT,
     TARGET_TRACKER_FPS,
-    align_bumi_qpos_to_ground,
+    audit_bumi_ground_contact,
     export_bumi_tracking_npz,
     nominal_bumi_qpos,
     validate_bumi_model,
@@ -47,7 +44,7 @@ from .bumi import (
 
 
 MANIFEST_SCHEMA_VERSION = 1
-PIPELINE_VERSION = 3
+PIPELINE_VERSION = 4
 REQUIRED_AMASS_FIELDS = (
     "pose_body",
     "root_orient",
@@ -55,6 +52,9 @@ REQUIRED_AMASS_FIELDS = (
     "betas",
     "gender",
 )
+HUMAN_POSE24_FOOT_INDICES = (10, 11)
+SOURCE_CONTACT_HEIGHT_MARGIN_M = 0.03
+SOURCE_CONTACT_MAX_VERTICAL_SPEED_MPS = 0.20
 
 
 @dataclass(frozen=True)
@@ -458,6 +458,40 @@ def _percentile(values: np.ndarray, percentile: float) -> float:
     return float(np.percentile(np.asarray(values, dtype=np.float64), percentile))
 
 
+def human_pose24_foot_contact_mask(sequence: Any) -> np.ndarray:
+    """Infer source foot contacts without assuming a fixed source FPS."""
+
+    foot_height = np.asarray(
+        sequence.body_pos_w[:, HUMAN_POSE24_FOOT_INDICES, 2],
+        dtype=np.float64,
+    )
+    timestamps = np.asarray(sequence.timestamps_s, dtype=np.float64)
+    if foot_height.shape[0] != timestamps.shape[0]:
+        raise ValueError("HumanPose24 foot positions/timestamps are misaligned")
+    if timestamps.shape[0] == 1:
+        foot_vertical_velocity = np.zeros_like(foot_height)
+    else:
+        edge_order = 2 if timestamps.shape[0] > 2 else 1
+        foot_vertical_velocity = np.gradient(
+            foot_height,
+            timestamps,
+            axis=0,
+            edge_order=edge_order,
+        )
+    clip_ground_reference = np.percentile(foot_height, 5.0, axis=0)
+    return (
+        (
+            foot_height
+            <= clip_ground_reference[None, :]
+            + SOURCE_CONTACT_HEIGHT_MARGIN_M
+        )
+        & (
+            np.abs(foot_vertical_velocity)
+            <= SOURCE_CONTACT_MAX_VERTICAL_SPEED_MPS
+        )
+    )
+
+
 class AmassToBumiConverter:
     """Stateful, single-worker converter with clip-local GMR resets."""
 
@@ -497,13 +531,17 @@ class AmassToBumiConverter:
         if gmr_path not in sys.path:
             sys.path.insert(0, gmr_path)
         from general_motion_retargeting import GeneralMotionRetargeting
-        from general_motion_retargeting.human_pose24 import HumanPose24Sequence
+        from general_motion_retargeting.human_pose24 import (
+            HumanPose24Sequence,
+            calibrate_human_pose24_input_height,
+        )
         from general_motion_retargeting.utils.smpl import load_smplx_file
         from general_motion_retargeting.utils.smplx_to_human_pose24 import (
             human_pose24_from_smplx_output,
         )
 
         self._human_pose_type = HumanPose24Sequence
+        self._calibrate_input_height = calibrate_human_pose24_input_height
         self._load_smplx_file = load_smplx_file
         self._human_pose_from_smplx = human_pose24_from_smplx_output
         self.model = mujoco.MjModel.from_xml_path(str(self.bumi_mjcf))
@@ -565,18 +603,22 @@ class AmassToBumiConverter:
             "joint_velocity_limits": BUMI_JOINT_VELOCITY_LIMITS,
             "root_linear_velocity_limit": BUMI_ROOT_LINEAR_VELOCITY_LIMIT,
             "root_angular_velocity_limit": BUMI_ROOT_ANGULAR_VELOCITY_LIMIT,
-            "ground_alignment": {
+            "input_height_bootstrap": (
+                self.retargeter.input_height_bootstrap_config.to_dict()
+            ),
+            "ground_audit": {
                 "foot_contact_geom_names": [
                     list(names) for names in BUMI_FOOT_CONTACT_GEOM_NAMES
                 ],
-                "reference_percentile": BUMI_GROUND_REFERENCE_PERCENTILE,
-                "target_foot_contact_height_m": (
-                    BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M
-                ),
-                "max_abs_offset_m": BUMI_GROUND_MAX_ABS_OFFSET_M,
                 "max_penetration_m": BUMI_GROUND_MAX_PENETRATION_M,
                 "max_penetrating_frame_fraction": (
                     BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION
+                ),
+                "source_contact_height_margin_m": (
+                    SOURCE_CONTACT_HEIGHT_MARGIN_M
+                ),
+                "source_contact_max_vertical_speed_mps": (
+                    SOURCE_CONTACT_MAX_VERTICAL_SPEED_MPS
                 ),
             },
         }
@@ -759,11 +801,20 @@ class AmassToBumiConverter:
             paths["human_pose24"],
             self._human_pose_provenance(entry),
         )
-        qpos, diagnostics = self.retargeter.retarget_sequence(
+        gmr_sequence, input_height_quality = self._calibrate_input_height(
             sequence,
+            self.retargeter.input_height_bootstrap_config,
+        )
+        qpos, diagnostics = self.retargeter.retarget_sequence(
+            gmr_sequence,
             initial_qpos=self.initial_qpos,
         )
-        qpos, ground_quality = align_bumi_qpos_to_ground(self.model, qpos)
+        source_foot_contact_mask = human_pose24_foot_contact_mask(sequence)
+        ground_quality = audit_bumi_ground_contact(
+            self.model,
+            qpos,
+            source_foot_contact_mask=source_foot_contact_mask,
+        )
         qpos_quality = self._qpos_quality(qpos, sequence.timestamps_s)
         diagnostics_arrays = {
             key: np.asarray([item[key] for item in diagnostics])
@@ -811,6 +862,18 @@ class AmassToBumiConverter:
             task_human_body_names=np.asarray(task_human_body_names),
             task_position_error=task_position_error,
             task_orientation_error_rad=task_orientation_error_rad,
+            input_height_offset_m=np.asarray(
+                [input_height_quality["input_height_offset_m"]],
+                dtype=np.float64,
+            ),
+            input_height_reference_min_body_height_m=np.asarray(
+                [
+                    input_height_quality[
+                        "input_height_reference_min_body_height_m"
+                    ]
+                ],
+                dtype=np.float64,
+            ),
             **diagnostics_arrays,
         )
         export_stats = dict(
@@ -832,8 +895,8 @@ class AmassToBumiConverter:
             name: index for index, name in enumerate(task_error_names)
         }
         foot_task_names = (
-            "table2:l_ankle_roll_link",
-            "table2:r_ankle_roll_link",
+            "table2:l_foot",
+            "table2:r_foot",
         )
         high_priority_task_names = (
             "table2:base_link",
@@ -899,6 +962,7 @@ class AmassToBumiConverter:
             "gate_orientation_pass": bool(
                 high_priority_orientation_p95_rad < np.deg2rad(15.0)
             ),
+            **input_height_quality,
             **qpos_quality,
             **ground_quality,
             "tracker_min_foot_contact_height_m": float(
@@ -913,8 +977,7 @@ class AmassToBumiConverter:
                 ]
             ),
             "gate_ground_contact_pass": bool(
-                ground_quality["gate_ground_contact_pass"]
-                and export_stats["tracker_ground_contact_pass"]
+                ground_quality["gate_native_ground_contact_pass"]
             ),
         }
         metadata = {

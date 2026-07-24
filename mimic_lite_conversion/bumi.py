@@ -119,16 +119,18 @@ BUMI_FOOT_CONTACT_GEOM_NAMES = (
     ),
 )
 
-# Use the physical collision sole rather than the ankle body or center foot
-# site: a pitched foot can have its center above Z=0 while its toe or heel is
-# visibly below the floor.  A low, robust percentile keeps one bad IK frame
-# from lifting an otherwise usable clip.  Applying one root-Z offset to the
-# whole clip preserves every vertical displacement, velocity and jump height.
+# Pipeline-v3 compatibility constants for ``align_bumi_qpos_to_ground``.
+# Pipeline v4 no longer uses that post-GMR translation in batch conversion;
+# the physical collision sole remains the source of read-only ground audits.
 BUMI_GROUND_REFERENCE_PERCENTILE = 0.1
 BUMI_GROUND_TARGET_FOOT_CONTACT_HEIGHT_M = 0.002
 BUMI_GROUND_MAX_ABS_OFFSET_M = 0.05
 BUMI_GROUND_MAX_PENETRATION_M = 0.005
 BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION = 0.002
+BUMI_CONTACT_FOOT_HEIGHT_P05_MIN_M = -0.015
+BUMI_CONTACT_FOOT_HEIGHT_MEDIAN_MAX_M = 0.015
+BUMI_DOUBLE_SUPPORT_LOW_FOOT_MEDIAN_MIN_M = -0.005
+BUMI_DOUBLE_SUPPORT_HIGH_FOOT_MEDIAN_MAX_M = 0.020
 
 # Conservative v1 dataset gates.  These are deliberately stricter than some
 # actuator limits: a clip may be physically rate-limited yet still be too
@@ -318,6 +320,113 @@ def bumi_foot_contact_heights(
                 lowest = min(lowest, height)
             heights[frame_idx, foot_idx] = lowest
     return heights
+
+
+def audit_bumi_ground_contact(
+    model: mujoco.MjModel,
+    qpos: np.ndarray,
+    *,
+    source_foot_contact_mask: np.ndarray | None = None,
+) -> dict[str, float | int | bool]:
+    """Measure physical Bumi sole clearance without changing the motion.
+
+    All-foot extrema remain visible for debugging, but the training gate uses
+    source-contact feet.  A pitched swing foot must not force the entire robot
+    upward and make the stance foot float.
+    """
+
+    foot_contact_heights = bumi_foot_contact_heights(model, qpos)
+    support_foot_height = foot_contact_heights.min(axis=1)
+    below_ground_fraction = float(np.mean(support_foot_height < 0.0))
+    below_penetration_limit_fraction = float(
+        np.mean(
+            support_foot_height
+            < -BUMI_GROUND_MAX_PENETRATION_M
+        )
+    )
+    minimum_height = float(support_foot_height.min())
+    result: dict[str, float | int | bool] = {
+        "native_min_foot_contact_height_m": minimum_height,
+        "native_support_foot_height_p05_m": float(
+            np.percentile(support_foot_height, 5.0)
+        ),
+        "native_support_foot_height_median_m": float(
+            np.median(support_foot_height)
+        ),
+        "native_foot_contact_below_ground_fraction": (
+            below_ground_fraction
+        ),
+        "native_foot_contact_below_minus_5mm_fraction": (
+            below_penetration_limit_fraction
+        ),
+    }
+    if source_foot_contact_mask is None:
+        result["gate_native_ground_contact_pass"] = bool(
+            minimum_height >= -BUMI_GROUND_MAX_PENETRATION_M
+            and below_ground_fraction
+            <= BUMI_GROUND_MAX_PENETRATING_FRAME_FRACTION
+        )
+        return result
+
+    contact_mask = np.asarray(source_foot_contact_mask, dtype=bool)
+    if contact_mask.shape != foot_contact_heights.shape:
+        raise ValueError(
+            "source_foot_contact_mask must have shape "
+            f"{foot_contact_heights.shape}, got {contact_mask.shape}"
+        )
+    if not np.any(contact_mask):
+        raise ValueError("source_foot_contact_mask contains no contact samples")
+
+    contact_heights = foot_contact_heights[contact_mask]
+    double_support_mask = np.all(contact_mask, axis=1)
+    contact_p05 = float(np.percentile(contact_heights, 5.0))
+    contact_median = float(np.median(contact_heights))
+    result.update(
+        {
+            "source_contact_sample_count": int(contact_heights.size),
+            "source_double_support_frame_count": int(
+                np.count_nonzero(double_support_mask)
+            ),
+            "native_contact_foot_height_p05_m": contact_p05,
+            "native_contact_foot_height_median_m": contact_median,
+            "native_contact_foot_below_minus_5mm_fraction": float(
+                np.mean(contact_heights < -BUMI_GROUND_MAX_PENETRATION_M)
+            ),
+        }
+    )
+    if np.any(double_support_mask):
+        double_support_heights = foot_contact_heights[double_support_mask]
+        double_low_median = float(
+            np.median(double_support_heights.min(axis=1))
+        )
+        double_high_median = float(
+            np.median(double_support_heights.max(axis=1))
+        )
+        result.update(
+            {
+                "native_double_support_low_foot_height_median_m": (
+                    double_low_median
+                ),
+                "native_double_support_high_foot_height_median_m": (
+                    double_high_median
+                ),
+            }
+        )
+        double_support_pass = bool(
+            double_low_median
+            >= BUMI_DOUBLE_SUPPORT_LOW_FOOT_MEDIAN_MIN_M
+            and double_high_median
+            <= BUMI_DOUBLE_SUPPORT_HIGH_FOOT_MEDIAN_MAX_M
+        )
+    else:
+        double_support_pass = True
+
+    result["gate_native_ground_contact_pass"] = bool(
+        contact_p05 >= BUMI_CONTACT_FOOT_HEIGHT_P05_MIN_M
+        and contact_median <= BUMI_CONTACT_FOOT_HEIGHT_MEDIAN_MAX_M
+        and double_support_pass
+    )
+    return result
 
 
 def align_bumi_qpos_to_ground(

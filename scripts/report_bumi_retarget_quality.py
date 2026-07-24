@@ -357,14 +357,81 @@ def build_report(
         ),
         "min_foot_contact_height_after_m": min(
             (
-                record.get("min_foot_contact_height_after_m", 0.0)
+                record.get(
+                    "min_foot_contact_height_after_m",
+                    record.get("native_min_foot_contact_height_m", 0.0),
+                )
                 for record in records
             ),
             default=0.0,
         ),
         "max_foot_contact_below_ground_fraction_after": max(
             (
-                record.get("foot_contact_below_ground_fraction_after", 0.0)
+                record.get(
+                    "foot_contact_below_ground_fraction_after",
+                    record.get(
+                        "native_foot_contact_below_ground_fraction",
+                        0.0,
+                    ),
+                )
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "min_native_contact_foot_height_p05_m": min(
+            (
+                record.get("native_contact_foot_height_p05_m", 0.0)
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "min_native_contact_foot_height_median_m": min(
+            (
+                record.get("native_contact_foot_height_median_m", 0.0)
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_native_contact_foot_height_median_m": max(
+            (
+                record.get("native_contact_foot_height_median_m", 0.0)
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_native_contact_foot_below_minus_5mm_fraction": max(
+            (
+                record.get(
+                    "native_contact_foot_below_minus_5mm_fraction",
+                    0.0,
+                )
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "min_native_double_support_low_foot_height_median_m": min(
+            (
+                record.get(
+                    "native_double_support_low_foot_height_median_m",
+                    0.0,
+                )
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_native_double_support_high_foot_height_median_m": max(
+            (
+                record.get(
+                    "native_double_support_high_foot_height_median_m",
+                    0.0,
+                )
+                for record in records
+            ),
+            default=0.0,
+        ),
+        "max_abs_input_height_offset_m": max(
+            (
+                abs(record.get("input_height_offset_m", 0.0))
                 for record in records
             ),
             default=0.0,

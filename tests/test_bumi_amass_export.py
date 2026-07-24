@@ -13,11 +13,15 @@ from scipy.spatial.transform import Rotation as R
 from mimic_lite_conversion.bumi import (
     BUMI_BODY_NAMES,
     BUMI_MOTION_JOINT_NAMES,
+    audit_bumi_ground_contact,
     align_bumi_qpos_to_ground,
     bumi_foot_contact_heights,
     export_bumi_tracking_npz,
     nominal_bumi_qpos,
     resample_bumi_qpos,
+)
+from mimic_lite_conversion.amass_gmr import (
+    human_pose24_foot_contact_mask,
 )
 
 
@@ -224,6 +228,47 @@ class BumiAmassExportTest(unittest.TestCase):
         )
         self.assertGreater(center_site_height, 0.03)
         self.assertLess(contact_height, -0.03)
+
+    def test_contact_aware_ground_gate_does_not_lift_for_swing_foot(self) -> None:
+        qpos = np.repeat(nominal_bumi_qpos(self.model)[None, :], 3, axis=0)
+        ankle_id = mujoco.mj_name2id(
+            self.model,
+            mujoco.mjtObj.mjOBJ_JOINT,
+            "l_ankle_pitch_joint",
+        )
+        qpos[:, self.model.jnt_qposadr[ankle_id]] = -0.96
+        # Only the flat right foot is a source-contact foot.  The deeply
+        # pitched left swing foot remains visible in all-foot audit metrics,
+        # but must not force a global root translation or fail the contact gate.
+        source_contact = np.zeros((3, 2), dtype=bool)
+        source_contact[:, 1] = True
+        stats = audit_bumi_ground_contact(
+            self.model,
+            qpos,
+            source_foot_contact_mask=source_contact,
+        )
+        self.assertLess(stats["native_min_foot_contact_height_m"], -0.03)
+        self.assertTrue(stats["gate_native_ground_contact_pass"])
+        self.assertEqual(stats["source_contact_sample_count"], 3)
+        np.testing.assert_allclose(qpos[:, 2], nominal_bumi_qpos(self.model)[2])
+
+    def test_human_pose_contact_inference_uses_native_timestamps(self) -> None:
+        timestamps = np.asarray([0.0, 0.01, 0.03, 0.06])
+        positions = np.zeros((4, 24, 3), dtype=np.float32)
+        positions[:, 10, 2] = 0.0
+        positions[:, 11, 2] = np.asarray([0.0, 0.0, 0.08, 0.08])
+        sequence = type(
+            "SequenceFixture",
+            (),
+            {
+                "body_pos_w": positions,
+                "timestamps_s": timestamps,
+            },
+        )()
+        contact = human_pose24_foot_contact_mask(sequence)
+        self.assertEqual(contact.shape, (4, 2))
+        self.assertTrue(np.all(contact[:, 0]))
+        self.assertFalse(contact[2, 1])
 
     def test_ground_alignment_clips_large_bad_offset_and_fails_gate(self) -> None:
         qpos = np.repeat(nominal_bumi_qpos(self.model)[None, :], 3, axis=0)

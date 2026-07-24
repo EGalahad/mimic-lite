@@ -832,3 +832,163 @@ GMR qpos 可保留为 teacher/critic privileged target 或对照，但不能继�
    当成兼容策略。
 
 因此，ExtremControl 是合理的第二版体系候选，但不是当前 GMR 数据转换 v1 的局部优化项。
+
+## 12. Pipeline v4：G1 地面链路对照与 Bumi 输入高度标定
+
+状态（2026-07-24）：代码完成，10 条 CMU subject 35 平地步行 pilot 完成；全量
+train/val 尚未按 v4 重转。
+
+### 12.1 G1 实际实现
+
+代码核对后的 G1 链路是：
+
+~~~text
+Pico/XRobot 24 点
+  → publisher 输入高度 bootstrap
+  → GMR xrobot_to_g1
+      Left/Right_Foot → left/right_toe_link
+      ground_height = 0
+  → G1 qpos/FK
+~~~
+
+需要明确区分三件事：
+
+1. `xrobot_to_g1.json` 的 `ground_height=0` 只是 IK target 的固定坐标偏移，不检查
+   MuJoCo collision，也不限制脚底穿地。
+2. GMR 内没有逐帧 floor clamp。live publisher 以往在 GMR 前把 24 点整体加一个
+   固定 Z offset；legacy 配置默认目标为 1 cm，并在第 30 个输入帧冻结当帧 offset。
+3. 同一批平地走路若绕过 publisher 输入标定，G1 实体脚底中位数约为
+   -1.86 cm。因此 1 cm 是历史 HumanPose24 输入参数，不是 G1 脚底应离地 1 cm，
+   也不能直接复制为所有机器人通用值。
+
+### 12.2 为什么废弃 pipeline v3
+
+Pipeline v3 在 GMR 后查整段动作所有 foot collision geom 的最低点，再给全部 qpos
+加一次固定 root-Z。它虽然不是逐帧 snapping，但仍有两个问题：
+
+- heel-strike、toe-off 或摆动脚大俯仰的一个低点会抬高整段动作，导致真正的支撑脚
+  在双支撑时悬空；
+- 最早用于 A/B 的十条 CMU subject 01 动作实际是爬梯子。没有梯子几何时，其脚本来
+  就不应被强制压到世界 `Z=0`，所以这组数据不能标定平地原点。
+
+因此 v4 的转换器不再调用 `align_bumi_qpos_to_ground`。旧函数和测试仅为读取/复现
+pipeline-v3 产物保留，不能进入新批量转换路径。
+
+### 12.3 v4 owner-layer contract
+
+正式链路改为：
+
+~~~text
+raw HumanPose24（原样缓存）
+  → 固定输入高度 bootstrap
+      Bumi: 首 1.0 s，最低 24 点的 p10 → 4.0 cm
+  → GMR toe-aware Bumi foot-site IK
+  → 原生时间轴 Bumi qpos（不做 root-Z 后处理）
+  → 唯一一次 50 Hz resampling
+  → tracker NPZ
+~~~
+
+参数 owner 是 GMR 的 `xrobot_to_bumi.json`，而不是离线脚本或 Pico publisher：
+
+~~~json
+"input_height_bootstrap": {
+  "target_min_body_height_m": 0.04,
+  "bootstrap_duration_s": 1.0,
+  "reference_percentile": 10.0
+}
+~~~
+
+- Offline 使用 `HumanPose24Sequence.timestamps_s` 截取首 1 秒，所以 60/100/120 Hz
+  AMASS 不会被误当成 30 Hz。
+- Online 使用 Pico 纳秒 timestamp；无源 timestamp 时才使用接收时间。启动窗口内
+  offset 因果更新，1 秒后冻结，不缓存 1 秒动作来增加遥操延迟。
+- G1 配置没有该字段时走兼容默认：1 cm、30 帧、最后一帧值；本次没有静默改变 G1。
+- Offline 为整条 clip 应用启动窗口最终得到的常量；online 的首 1 秒会逐步收敛，
+  这是明确记录的启动期差异。冻结后两侧使用相同常量算法和同一配置。
+
+### 12.4 Bumi 足端 frame 与动作完成度
+
+HumanPose24 的 `Left_Foot/Right_Foot` 来自 SMPL toe joint。旧配置约束
+`ankle_roll_link` 并用 sole-center offset，脚发生俯仰时 position residual 不直接对应
+实体脚掌。v4 改为：
+
+- IK frame：MuJoCo `l_foot/r_foot` site；
+- Human target：`Left_Foot/Right_Foot`；
+- site target 的局部 offset：`[-0.075, 0, 0.001]`，即从 Bumi toe contact point
+  回到 sole-center site；
+- position/orientation cost 保持 100/8，保留 heel/toe 动作完成度；
+- reach/root scale 仍按 actuated ankle chain 计算（1.8 m 假设下 pelvis 约 0.595），
+  rigid sole 几何只由 offset 表达。
+
+曾实验把 rigid sole 也累计进 reach scale，pelvis scale 上升到约 0.649，静态
+base position residual 由约 8.3 cm 恶化到约 12.2 cm。虽然 foot-site residual
+更小，但躯干被迫为不可兼得的足端长度让步，因此按动作完成度回退到 ankle-chain
+scale。
+
+### 12.5 4 cm 的选择依据
+
+4 cm 仍是原始 HumanPose24 最低点目标，不是 Bumi 脚底 clearance。
+`actual_human_height=1.6` 时，输入 Z 变化到 Bumi root-Z 的比例约为 0.529。
+
+使用 CMU subject 35 的十条平地 walk 做完整
+`HumanPose24 → GMR → Bumi collision FK` 扫描。3.5 cm 与 4.0 cm 均实际重转，
+不是在旧 qpos 上伪造最终产物：
+
+| 输入目标 | ground gate | 最坏 contact-foot p05 | 最坏双支撑低脚中位数 | 最高双支撑高脚中位数 |
+| --- | ---: | ---: | ---: | ---: |
+| 3.5 cm | 9/10 | -12.9 mm | -6.9 mm | +7.9 mm |
+| 4.0 cm | 10/10 | -10.3 mm | -4.2 mm | +10.5 mm |
+
+4 cm 是扫描档位中满足逐 clip gate 的最小值。它只比 3.5 cm 抬高最终 Bumi
+约 2.6 mm；双支撑高脚仍约 1 cm，未回到 pipeline-v3 约 3 cm 的明显悬空。
+
+### 12.6 接触感知 audit，不参与动作修改
+
+源接触在原生时间轴上由以下只读规则估计：
+
+~~~text
+foot_z <= per-clip foot_z p05 + 0.03 m
+abs(foot_vertical_velocity) <= 0.20 m/s
+~~~
+
+Ground gate 检查 contact-foot p05/median 与双支撑低/高脚中位数。所有 collision
+geom 的最低点、0 以下比例和 5 mm 以下比例仍写入 metadata/quality report，但摆动脚
+的俯仰极值不再抬高 root，也不单独决定训练 gate。梯子、台阶等非平地动作在缺少对应
+场景几何时应进入 review，而不是被后处理伪装成平地动作。
+
+### 12.7 Pilot 结果与产物
+
+最终 pilot：
+
+- 10/10 converted，0 reject；
+- 4,120 个 120 Hz native frames → 1,718 个 50 Hz tracker frames；
+- pipeline integrity 通过，ground/foot-position/root-position gate 均 10/10；
+- 9 条 automatic training-ready；
+- `35_08` 仅因 orientation gate 进入 geometry review，与地面标定无关；
+- contact-foot median 的逐 clip 范围为 3.6--7.4 mm。
+
+产物目录：
+
+~~~text
+.cache/mimic-lite/retarget/bumi/amass/flat_walk_v4_10/
+  human_pose24/
+  native_qpos/
+  tracker_50hz/
+  metadata/
+  reports/
+~~~
+
+查看命令：
+
+~~~bash
+cd /data/jun7.shi/code/poc/github/EGalahad/active-adaptation
+PYTHONPATH=projects/mimic-lite \
+uv --project venv/mjlab run --with mjviser==0.0.14 \
+  python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
+  --motion-dir \
+  .cache/mimic-lite/retarget/bumi/amass/flat_walk_v4_10/tracker_50hz
+~~~
+
+全量 1,983 条数据的既有数字仍属于 pipeline v2。下一次正式训练前必须按 v4
+重新转换 train/val、重新生成 quality report 和 staging；不能把旧 corpus 标记成
+已经获得 online/offline 高度 parity。

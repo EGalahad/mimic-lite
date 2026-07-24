@@ -279,43 +279,67 @@ training gate:
 - total: 1,983/1,983 clips and 1,630,534 final 50 Hz frames, with zero
   conversion rejects, missing clips, stale metadata, or train/val overlap.
 
-##### Ground alignment (pipeline v3)
+##### Ground-origin parity (pipeline v4)
 
-The counts above describe the completed pipeline-v2 corpus. Pipeline v3 fixes
-two independent sources of Bumi feet appearing below the Viser ground:
+The counts above are the completed pipeline-v2 corpus. Pipeline v3 added one
+post-GMR root-Z translation based on the lowest collision point in the entire
+clip. It prevented penetration but made ordinary double-support poses float:
+a pitched swing foot or heel/toe transition could lift every frame. Its first
+ten-clip visual set was also CMU subject 01 ladder climbing, not a valid
+flat-ground calibration set. Pipeline v3 is retained only as compatibility
+code and is not called by the batch converter.
 
-1. GMR now scales the absolute pelvis translation with the mean left/right foot
-   reach, instead of the much shorter torso ratio. With GMR's root-relative
-   point scaling, using the torso ratio drove otherwise valid foot targets
-   below Z=0.
-2. After IK, the converter measures the lowest point of all 22 MuJoCo
-   sphere/capsule foot collision geoms. It translates the entire clip once in Z
-   so the 0.1 percentile is 2 mm above the floor. The correction is capped at
-   ±5 cm; clipping or residual penetration fails `gate_ground_contact_pass`.
+The G1 implementation does not contain a floor/collision clamp in GMR either.
+`xrobot_to_g1.json` maps HumanPose24 feet to the two toe links and declares
+`ground_height=0`; the live Pico publisher applies a fixed input-height offset
+before GMR. Legacy G1 configurations inherit the existing 1 cm target and
+freeze the last of 30 startup frames. On the same flat-walk source, bypassing
+that publisher calibration leaves the physical G1 sole median about 1.86 cm
+below Z=0. Thus 1 cm is a legacy HumanPose24 input target, not a universal
+robot-foot clearance.
 
-This is not per-frame foot snapping. Every frame receives exactly the same
-translation, so jump height, root-Z differences and vertical velocities are
-unchanged. The final 50 Hz motion is checked again after interpolation, and
-both native- and tracker-timeline measurements are stored in metadata and the
-quality report.
+Pipeline v4 makes the offline and live Bumi paths share the robot-specific
+`input_height_bootstrap` section generated in `xrobot_to_bumi.json`:
 
-On the same ten CMU clips used for the visual A/B, the final 50 Hz Bumi mesh
-went from 28.45% of frames with some visible sole below Z=0 to 0.094%; no frame
-was more than 5 mm below ground. The per-clip root correction was
-1.6–4.6 cm, no correction hit the cap, all ten ground gates passed, and the
-existing dynamics/geometry grouping was otherwise unchanged.
+1. Use HumanPose24 timestamps, not a presumed source FPS. Over the first
+   1.0 seconds, take the 10th percentile of the lowest of the 24 body points.
+2. Apply one fixed input-space Z offset that makes that reference 4.0 cm, then
+   run GMR. The raw HumanPose24 NPZ remains unchanged for provenance/Viser.
+3. Map the SMPL `Left/Right_Foot` toe joints to the Bumi `l_foot/r_foot` MuJoCo
+   sites with the fixed site-to-toe target offset `[-0.075, 0, 0.001]`.
+   Reach scaling still ends at the actuated ankle chain, avoiding the 12 cm
+   base residual produced by counting the rigid sole twice.
+4. Do not translate, clamp, or foot-snap the resulting Bumi qpos. Resampling to
+   50 Hz is still the only temporal resampling operation.
 
-Pipeline v3 intentionally invalidates pipeline-v2 `--resume` entries. Re-run
-the train/val conversion, quality report and staging commands above before
-using the full AMASS corpus for a new training run. A checked ten-clip result is
-available for visual review now:
+The 4 cm value is also an input-space target, not Bumi sole clearance. With
+`actual_human_height=1.6`, its vertical response is scaled by about 0.529.
+It is the smallest tested target for which every one of ten CMU subject 35
+flat-walk clips passes the per-clip contact gate. Source contacts are inferred
+on the native timeline (`foot_z <= clip p05 + 3 cm` and
+`|vertical velocity| <= 0.20 m/s`); pitched swing-foot extrema remain in the
+audit but cannot lift the stance foot.
+
+The final pipeline-v4 pilot converted 10/10 clips (4,120 native frames to 1,718
+tracker frames) with no reject or integrity failure. All ten pass the ground,
+foot-position, and root-position gates; nine are automatically training-ready,
+while `35_08` remains geometry review only because of its orientation gate.
+Across clips, contact-foot median height is 3.6--7.4 mm, the worst contact-foot
+p05 is -10.3 mm, and double-support low/high-foot median bounds are
+-4.2/+10.5 mm. These are read-only FK/contact measurements; no output
+postprocessing is hidden behind them.
+
+Pipeline v4 invalidates pipeline-v2/v3 `--resume` entries. The 1,983-clip counts
+and staging counts in this README remain historical pipeline-v2 results until
+train/val are reconverted and re-reported with v4. The checked flat-walk pilot
+is available for visual review:
 
 ```bash
 PYTHONPATH=projects/mimic-lite \
 uv --project venv/mjlab run --with mjviser==0.0.14 \
   python projects/mimic-lite/scripts/view_bumi_retarget_viser.py \
   --motion-dir \
-  .cache/mimic-lite/retarget/bumi/amass/ground_collision_aligned_10/tracker_50hz
+  .cache/mimic-lite/retarget/bumi/amass/flat_walk_v4_10/tracker_50hz
 ```
 
 The raw HumanPose24, native GMR qpos, final tracker NPZ, metadata, and review
