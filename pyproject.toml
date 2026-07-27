@@ -9,12 +9,8 @@ requires-python = ">=3.11,<3.13"
 dependencies = [
     "active_adaptation",
     "mjhub @ git+https://github.com/EGalahad/mjhub.git@main",
-    # "any4hdmi @ git+https://github.com/EGalahad/any4hdmi.git@main",
-    "any4hdmi",
+    "any4hdmi @ git+https://github.com/EGalahad/any4hdmi.git@main",
 ]
-
-[tool.uv.sources]
-any4hdmi = { path = "../../../any4hdmi", editable = true }
 
 [project.entry-points."active_adaptation.projects"]
 mimic_lite = "mimic_lite"
