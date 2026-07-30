@@ -1,0 +1,10 @@
+# @package task.command
+
+windowed_next_window_device: current
+windowed_pin_window_load: true
+motion_cfgs:
+  bumi_twist2_robot_retarget:
+    path: ".cache/mimic-lite/motions/bumi/twist2_robot_retarget"
+    weight: 1.0
+    full_motion: false
+    shard: false

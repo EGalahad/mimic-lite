@@ -24,6 +24,7 @@ class JointPosition(Action, namespace="mimic_lite"):
         max_delay: int = 0,
         alpha: float | Sequence[float] | None = None,
         alpha_range: Tuple[float, float] = (0.5, 1.0),
+        expected_action_dim: int | None = None,
     ):
         super().__init__(env)
 
@@ -39,6 +40,16 @@ class JointPosition(Action, namespace="mimic_lite"):
             device=self.device,
         )
         self.action_scaling = torch.tensor(scaling, device=self.device)
+        if expected_action_dim is not None:
+            if self.action_dim != expected_action_dim:
+                raise ValueError(
+                    f"Expected action_dim={expected_action_dim}, got {self.action_dim}: "
+                    f"{self.joint_names}"
+                )
+            print(
+                "[mimic_lite][joint_position]"
+                f" action_dim={self.action_dim} joints={self.joint_names}"
+            )
 
         self.min_delay = int(min_delay) if min_delay is not None else 0
         self.max_delay = int(max_delay) if max_delay is not None else 0

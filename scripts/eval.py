@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import Any, Sequence, cast
 
 import hydra
 import torch
@@ -23,10 +23,6 @@ from tqdm import tqdm
 import active_adaptation as aa
 from active_adaptation.learning.modules.vecnorm import VecNorm
 from active_adaptation.utils.wandb import parse_checkpoint_path
-
-if TYPE_CHECKING:
-    from active_adaptation.envs.env_base import _EnvBase
-
 
 FILE_PATH = Path(__file__).resolve().parent
 CONFIG_PATH = FILE_PATH.parent / "cfg"
@@ -60,7 +56,7 @@ def _jsonable(values: dict[str, float | int]) -> dict[str, float | int]:
     return result
 
 
-def _initial_motion_length(carry: TensorDict, env: "_EnvBase") -> torch.Tensor:
+def _initial_motion_length(carry: TensorDict, env: Any) -> torch.Tensor:
     command_manager = getattr(env.base_env, "command_manager", None)
     if command_manager is not None:
         return command_manager.motion_len.detach().clone().to(torch.float32).squeeze(-1)
@@ -75,8 +71,65 @@ def _initial_motion_length(carry: TensorDict, env: "_EnvBase") -> torch.Tensor:
     return motion_length.detach().clone().to(torch.float32).squeeze(-1)
 
 
+def _initial_motion_ids(env: Any) -> torch.Tensor:
+    command_manager = env.base_env.command_manager
+    return command_manager.motion_ids.detach().clone().to(torch.long).squeeze(-1)
+
+
+def _aggregate_motion_progress(
+    motion_ids: torch.Tensor,
+    progress: torch.Tensor,
+    *,
+    num_motions: int,
+) -> TensorDict:
+    motion_ids = motion_ids.reshape(-1).to(torch.long)
+    progress = progress.reshape(-1).to(torch.float32)
+    if motion_ids.numel() == 0:
+        raise ValueError("Cannot aggregate an empty motion-id tensor")
+    if motion_ids.shape != progress.shape:
+        raise ValueError(
+            f"motion_ids and progress must have identical shapes, got "
+            f"{motion_ids.shape} and {progress.shape}"
+        )
+    if num_motions <= 0:
+        raise ValueError(f"num_motions must be positive, got {num_motions}")
+    if int(motion_ids.min().item()) < 0 or int(motion_ids.max().item()) >= num_motions:
+        raise ValueError(
+            f"motion ids must be in [0, {num_motions}), got "
+            f"[{int(motion_ids.min().item())}, {int(motion_ids.max().item())}]"
+        )
+
+    unique_ids = torch.unique(motion_ids, sorted=True)
+    counts = []
+    means = []
+    stds = []
+    minimums = []
+    for motion_id in unique_ids:
+        values = progress[motion_ids == motion_id]
+        counts.append(values.numel())
+        means.append(values.mean())
+        stds.append(values.std(unbiased=False))
+        minimums.append(values.min())
+
+    return TensorDict(
+        {
+            "motion_id": unique_ids,
+            "count": torch.as_tensor(counts, dtype=torch.long, device=unique_ids.device),
+            "progress_mean": torch.stack(means),
+            "progress_std": torch.stack(stds),
+            "progress_min": torch.stack(minimums),
+        },
+        batch_size=[len(unique_ids)],
+    )
+
+
+def _motion_paths(env: Any) -> list[str]:
+    paths = env.base_env.command_manager.dataset.motion_paths
+    return [str(path) for path in paths]
+
+
 @VecNorm.freeze()
-def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
+def fixed_step_eval(cfg: DictConfig, env: Any, policy) -> TensorDict:
     env.base_env.eval()
     assert not env.base_env.training
 
@@ -85,6 +138,9 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
     store_rollout = bool(cfg.get("store_rollout", True))
     carry = env.reset()
     motion_length = _initial_motion_length(carry, env)
+    initial_motion_ids = _initial_motion_ids(env)
+    base_env = cast(Any, env).base_env
+    num_motions = int(base_env.command_manager.dataset.num_motions)
     first_done_step = torch.full(
         (int(env.num_envs),),
         steps,
@@ -139,6 +195,12 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
     lafan_progress = (first_episode_length / progress_horizon.clamp_min(1.0)).clamp(
         max=1.0
     )
+    motion_metrics = _aggregate_motion_progress(
+        initial_motion_ids.detach().cpu(),
+        lafan_progress.detach().cpu(),
+        num_motions=num_motions,
+    )
+    num_unique_motions = int(motion_metrics.batch_size[0])
     reward_stats = {key: float(value) for key, value in env.stats_ema.items()}
     episode_summary = {
         f"stats/termination/{name}": (
@@ -167,6 +229,9 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
         "motion_length_mean": float(motion_length_safe.mean().item()),
         "progress_horizon_mean": float(progress_horizon.mean().item()),
         "num_first_episodes_finished": int(first_done_seen.sum().item()),
+        "num_total_motions": num_motions,
+        "num_unique_motions": num_unique_motions,
+        "motion_coverage": num_unique_motions / num_motions,
     }
 
     return TensorDict(
@@ -178,9 +243,11 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
                     "first_episode_length": first_episode_length.detach().cpu(),
                     "motion_length": motion_length_safe.detach().cpu(),
                     "first_done_seen": first_done_seen.detach().cpu(),
+                    "initial_motion_id": initial_motion_ids.detach().cpu(),
                 },
                 batch_size=[int(env.num_envs)],
             ),
+            "motion_metrics": motion_metrics,
             "summary": _scalar_tensordict(summary, device=torch.device("cpu")),
             "reward_stats": _scalar_tensordict(reward_stats, device=torch.device("cpu")),
             "episode_summary": _scalar_tensordict(
@@ -191,21 +258,55 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
     )
 
 
-def _write_summary_json(path: Path, cfg: DictConfig, result: TensorDict) -> None:
-    summary = _jsonable(
-        {key: value.item() for key, value in result["summary"].items()}
-    )
+def _write_summary_json(
+    path: Path,
+    cfg: DictConfig,
+    result: TensorDict,
+    *,
+    motion_paths: Sequence[str] = (),
+) -> None:
+    summary_td = cast(TensorDict, result.get("summary"))
+    reward_stats_td = cast(TensorDict, result.get("reward_stats"))
+    episode_summary_td = cast(TensorDict, result.get("episode_summary"))
+    motion_metrics = cast(TensorDict, result.get("motion_metrics"))
+    summary = _jsonable({key: value.item() for key, value in summary_td.items()})
     reward_stats = _jsonable(
-        {key: value.item() for key, value in result["reward_stats"].items()}
+        {key: value.item() for key, value in reward_stats_td.items()}
     )
     episode_summary = _jsonable(
-        {key: value.item() for key, value in result["episode_summary"].items()}
+        {key: value.item() for key, value in episode_summary_td.items()}
     )
+    per_motion = {}
+    for index in range(motion_metrics.batch_size[0]):
+        motion_id = int(motion_metrics["motion_id"][index].item())
+        motion_path = motion_paths[motion_id] if motion_id < len(motion_paths) else ""
+        path_obj = Path(motion_path) if motion_path else None
+        motion_name = ""
+        if path_obj is not None:
+            motion_name = (
+                path_obj.parent.name
+                if path_obj.name == "motion.npz"
+                else path_obj.stem
+            )
+        per_motion[str(motion_id)] = {
+            "path": motion_path,
+            "name": motion_name,
+            "count": int(motion_metrics["count"][index].item()),
+            "progress_mean": float(motion_metrics["progress_mean"][index].item()),
+            "progress_std": float(motion_metrics["progress_std"][index].item()),
+            "progress_min": float(motion_metrics["progress_min"][index].item()),
+        }
     payload = {
         "checkpoint_path": str(cfg.get("checkpoint_path", "")),
         "summary": summary,
         "reward_stats": reward_stats,
         "episode_summary": episode_summary,
+        "motion_metrics": {
+            "num_total_motions": int(summary["num_total_motions"]),
+            "num_unique_motions": int(summary["num_unique_motions"]),
+            "motion_coverage": float(summary["motion_coverage"]),
+            "per_motion": per_motion,
+        },
         "tensordict_output": str(Path(cfg.eval_output).resolve()),
     }
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -241,7 +342,12 @@ def main(cfg: DictConfig) -> None:
 
     summary_output = cfg.get("eval_summary_output", None)
     if summary_output is not None:
-        _write_summary_json(Path(summary_output).resolve(), cfg, result)
+        _write_summary_json(
+            Path(summary_output).resolve(),
+            cfg,
+            result,
+            motion_paths=_motion_paths(env),
+        )
 
     env.close()
 
