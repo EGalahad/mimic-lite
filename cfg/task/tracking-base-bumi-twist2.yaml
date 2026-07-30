@@ -7,7 +7,8 @@ name: BumiTrackTwist2
 
 # Keep normalized policy outputs in a trainable range for the full TWIST2
 # upper-body workspace while leaving the motor-derived lower-body scales
-# unchanged.
+# unchanged. These scales normalize position targets; they do not change
+# actuator gains or torque/velocity limits.
 arm_pitch_action_scale: 0.88
 arm_roll_action_scale: 0.46
 arm_yaw_action_scale: 0.53
