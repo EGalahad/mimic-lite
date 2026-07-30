@@ -1,0 +1,14 @@
+# @package task
+defaults:
+  - tracking-base-bumi
+  - _self_
+
+name: BumiTrackTwist2
+
+# Keep normalized policy outputs in a trainable range for the full TWIST2
+# upper-body workspace while leaving the motor-derived lower-body scales
+# unchanged.
+arm_pitch_action_scale: 0.88
+arm_roll_action_scale: 0.46
+arm_yaw_action_scale: 0.53
+elbow_pitch_action_scale: 0.64

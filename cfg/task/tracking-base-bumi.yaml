@@ -10,6 +10,11 @@ defaults:
 
 name: BumiTrackBase
 project: mimic_lite
+arm_action_scale: 0.11458333
+arm_pitch_action_scale: ${.arm_action_scale}
+arm_roll_action_scale: ${.arm_action_scale}
+arm_yaw_action_scale: ${.arm_action_scale}
+elbow_pitch_action_scale: ${.arm_action_scale}
 
 shared:
   root_body_name: base_link
@@ -91,13 +96,13 @@ input:
       ".*_leg_pitch_joint": 0.25
       waist_yaw_joint: 0.12735849
       ".*_leg_roll_joint": 0.1125
-      ".*_arm_pitch_joint": 0.11458333
+      ".*_arm_pitch_joint": ${....arm_pitch_action_scale}
       ".*_leg_yaw_joint": 0.1125
-      ".*_arm_roll_joint": 0.11458333
+      ".*_arm_roll_joint": ${....arm_roll_action_scale}
       ".*_knee_pitch_joint": 0.33333333
-      ".*_arm_yaw_joint": 0.11458333
+      ".*_arm_yaw_joint": ${....arm_yaw_action_scale}
       ".*_ankle_pitch_joint": 0.325
-      ".*_elbow_pitch_joint": 0.11458333
+      ".*_elbow_pitch_joint": ${....elbow_pitch_action_scale}
       ".*_ankle_roll_joint": 0.325
     min_delay: 0
     max_delay: 0
