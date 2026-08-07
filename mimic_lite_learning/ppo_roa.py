@@ -83,6 +83,10 @@ class PPOConfig:
     policy_lr: float = 3e-4
     critic_lr: float = 3e-4
     desired_kl: float | None = 0.01
+    desired_kl_end: float | None = None
+    tail_kl_lr_control: bool = True
+    kl_lr_high_threshold_ratio: float = 2.0
+    epoch_kl_early_stop: bool = False
     opt: str = "muon"
     reg_coef: float = 0.2
     reg_warmup_start: int = 500
@@ -131,6 +135,14 @@ class PPOConfig:
             raise ValueError(
                 "opt must be one of {'adam', 'adamw', 'muon'}, " f"got {self.opt!r}"
             )
+
+        self.kl_lr_high_threshold_ratio = float(self.kl_lr_high_threshold_ratio)
+        if self.kl_lr_high_threshold_ratio <= 0:
+            raise ValueError("kl_lr_high_threshold_ratio must be positive")
+        if self.desired_kl_end is not None:
+            self.desired_kl_end = float(self.desired_kl_end)
+            if self.desired_kl_end <= 0:
+                raise ValueError("desired_kl_end must be positive")
 
         if isinstance(self.grad_sync_mode, str):
             self.grad_sync_mode = self.grad_sync_mode.lower()
@@ -355,7 +367,8 @@ class PPOROA(PPOBase):
             self.world_size = aa.get_world_size()
             if self.cfg.grad_sync_mode == "ddp":
                 self._wrap_ddp(local_rank=aa.get_local_rank())
-            self._broadcast_parameters()
+            else:
+                self._broadcast_parameters()
 
         if self.cfg.phase in {"train", "finetune"}:
             # PPO related optimizers
@@ -549,12 +562,19 @@ class PPOROA(PPOBase):
         progress = (current_iter - start_iter) / (end_iter - start_iter)
         return start_value + (end_value - start_value) * progress
 
-    def _update_policy_lr(self, mean_kl: float) -> None:
+    def _update_policy_lr(
+        self, mean_kl: float, tail_kl: float, high_threshold_ratio: float
+    ) -> None:
         if self.desired_kl is None:
             return
-        if mean_kl > self.desired_kl * 2.0:
-            self.lr_policy = max(1e-5, self.lr_policy / 1.2)
-        elif 0.0 < mean_kl < self.desired_kl / 2.0:
+        tail_control = self.cfg.tail_kl_lr_control
+        control_kl = tail_kl if tail_control else mean_kl
+        if control_kl > self.desired_kl * high_threshold_ratio:
+            self.lr_policy = max(5e-7, self.lr_policy / 1.2)
+        elif (
+            0.0 < mean_kl < self.desired_kl / 2.0
+            and (not tail_control or tail_kl < self.desired_kl)
+        ):
             self.lr_policy = min(1e-2, self.lr_policy * 1.2)
         for param_group in self.opt_policy.param_groups:
             param_group["lr"] = self.lr_policy
@@ -685,24 +705,82 @@ class PPOROA(PPOBase):
                 self.cfg.reg_warmup_start,
                 self.cfg.reg_warmup_end,
             )
+            kl_high_threshold_ratio = self.cfg.kl_lr_high_threshold_ratio
+            if self.cfg.desired_kl is not None:
+                desired_kl_end = (
+                    self.cfg.desired_kl
+                    if self.cfg.desired_kl_end is None
+                    else self.cfg.desired_kl_end
+                )
+                self.desired_kl = self._linear_schedule(
+                    current_iter,
+                    self.cfg.desired_kl,
+                    desired_kl_end,
+                    self.cfg.entropy_decay_start,
+                    self.cfg.entropy_decay_end,
+                )
 
         with ScopedTimer("training.policy.minibatch_loop", sync=False):
+            epochs_completed = 0
+            kl_early_stop = False
+            epoch_kl_p90 = None
             for _ in range(self.cfg.ppo_epochs):
+                epoch_infos = []
                 for minibatch in make_batch(tensordict, self.cfg.num_minibatches):
                     with ScopedTimer("training.policy.update_ppo", sync=False):
                         info = self._update_ppo(minibatch)
                     infos.append(info)
+                    epoch_infos.append(info)
+                epochs_completed += 1
+                if self.cfg.epoch_kl_early_stop and self.desired_kl is not None:
+                    epoch_kls = torch.stack(
+                        [info["actor/kl"].detach().float() for info in epoch_infos]
+                    )
+                    if aa.is_distributed():
+                        dist.all_reduce(epoch_kls, op=dist.ReduceOp.AVG)
+                    epoch_kl_p90 = torch.quantile(epoch_kls, 0.9).item()
+                    if epoch_kl_p90 > (
+                        self.desired_kl * kl_high_threshold_ratio
+                    ):
+                        kl_early_stop = True
+                        break
 
         with ScopedTimer("training.policy.aggregate_infos", sync=False):
+            update_metrics = torch.stack(
+                [
+                    torch.stack(
+                        [info[key].detach().float() for info in infos]
+                    )
+                    for key in ("actor/kl", "actor/clamp_ratio")
+                ]
+            )
+            if aa.is_distributed():
+                dist.all_reduce(update_metrics, op=dist.ReduceOp.AVG)
+            kl_updates, clamp_updates = update_metrics
             infos = pytree.tree_map(lambda *xs: sum(xs).item() / len(xs), *infos)
+            infos["actor/kl_update_max"] = kl_updates.max().item()
+            infos["actor/kl_update_p90"] = torch.quantile(kl_updates, 0.9).item()
+            infos["actor/kl_update_last"] = kl_updates[-1].item()
+            infos["actor/clamp_ratio_update_max"] = clamp_updates.max().item()
             if self.desired_kl is not None:
-                mean_kl = torch.tensor(infos["actor/kl"], device=self.device)
-                if aa.is_distributed():
-                    dist.all_reduce(mean_kl, op=dist.ReduceOp.AVG)
-                self._update_policy_lr(mean_kl.item())
+                self._update_policy_lr(
+                    kl_updates.mean().item(),
+                    infos["actor/kl_update_p90"],
+                    kl_high_threshold_ratio,
+                )
             infos["actor/lr"] = self.lr_policy
             infos["actor/entropy_coef"] = self.entropy_coef
+            infos["actor/kl_high_threshold_ratio"] = kl_high_threshold_ratio
+            if self.desired_kl is not None:
+                infos["actor/desired_kl"] = self.desired_kl
+                infos["actor/kl_high_threshold"] = (
+                    self.desired_kl * kl_high_threshold_ratio
+                )
             infos["actor/reg_coef"] = self.reg_coef
+            infos["actor/epochs_completed"] = epochs_completed
+            infos["actor/kl_early_stop"] = float(kl_early_stop)
+            if epoch_kl_p90 is not None:
+                infos["actor/kl_epoch_last_p90"] = epoch_kl_p90
 
             ret = tensordict["ret"]
             ret_mean = ret.mean(dim=(0, 1))

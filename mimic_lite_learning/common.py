@@ -112,17 +112,15 @@ class EmpiricalNormalizer(nn.Module):
 def check_vecnorm_divergence(vecnorm: VecNorm):
     world_size = aa.get_world_size()
 
-    loc, scale = vecnorm._compute()
-    gather_loc = [torch.empty_like(loc) for _ in range(world_size)]
-    gather_scale = [torch.empty_like(scale) for _ in range(world_size)]
-    dist.all_gather(gather_loc, loc)
-    dist.all_gather(gather_scale, scale)
+    loc_scale = torch.stack(vecnorm._compute())
+    gathered = [torch.empty_like(loc_scale) for _ in range(world_size)]
+    dist.all_gather(gathered, loc_scale)
 
     loc_diffs = []
     scale_diffs = []
     for i in range(world_size):
-        loc_diff = torch.abs(gather_loc[i] - loc).sum().item()
-        scale_diff = torch.abs(gather_scale[i] - scale).sum().item()
+        loc_diff = torch.abs(gathered[i][0] - loc_scale[0]).sum().item()
+        scale_diff = torch.abs(gathered[i][1] - loc_scale[1]).sum().item()
         loc_diffs.append(loc_diff)
         scale_diffs.append(scale_diff)
     return loc_diffs, scale_diffs
