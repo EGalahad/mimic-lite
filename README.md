@@ -15,9 +15,11 @@ Setup uv venv directories and install dependencies:
 ```bash
 mkdir -p venv/mjlab
 cp projects/mimic-lite/pyproject-mjlab.toml venv/mjlab/pyproject.toml
+uv sync --project venv/mjlab
 
 mkdir -p venv/isaaclab
 cp projects/mimic-lite/pyproject-isaaclab.toml venv/isaaclab/pyproject.toml
+uv sync --project venv/isaaclab
 ```
 
 The repository should now look like this:
@@ -39,9 +41,11 @@ Refresh project discovery:
 
 ```bash
 uv --project venv/mjlab run aa-discover-projects
+uv --project venv/mjlab run aa-project enable mimic_lite
+uv --project venv/mjlab run aa-list-tasks
 ```
 
-This command generates the project registry at `.cache/projects.json`. Open that file and make sure both MimicLite entries are enabled:
+These commands refresh project discovery, enable MimicLite, and verify its tasks.
 
 Set up environment variables:
 
