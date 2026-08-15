@@ -159,8 +159,9 @@ observation:
 reward:
   tracking:
     root_pos:
-      _target_: mimic_lite.body_pos_exp
+      _target_: mimic_lite.windowed_root_displacement_exp
       body_names: ["${task.shared.reward_root_body_name}"]
+      history_steps: [200]
       enabled: true
       weight: 0.5
       sigma: 0.3
