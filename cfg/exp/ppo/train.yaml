@@ -9,10 +9,10 @@ checkpoint_interval: 1000
 upload_interval: 1000
 
 algo:
-  entropy_coef_start: 0.008
+  entropy_coef_start: 0.01
   entropy_coef_end: 0.002
-  entropy_decay_start: 2500
-  entropy_decay_end: 3500
+  entropy_decay_start: 0.75
+  entropy_decay_end: 1.0
 
 task:
   num_envs: 8192

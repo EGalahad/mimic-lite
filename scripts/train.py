@@ -56,6 +56,8 @@ def main(cfg: DictConfig):
         total_frames = cfg.get("total_frames", -1) // aa.get_world_size()
         total_frames = total_frames // frames_per_batch * frames_per_batch
         total_iters = total_frames // frames_per_batch
+    env.total_iters = total_iters
+    policy.total_iters = total_iters
 
     checkpoint_interval = cfg.checkpoint_interval
     upload_interval = cfg.upload_interval

@@ -139,7 +139,7 @@ class PPOConfig:
 
     lr: float = 3e-4
     desired_kl: float | None = 0.01
-    desired_kl_end: float | None = None
+    desired_kl_end: float | None = 0.005
     tail_kl_lr_control: bool = True
     kl_lr_high_threshold_ratio: float = 2.0
     epoch_kl_early_stop: bool = False
@@ -148,10 +148,10 @@ class PPOConfig:
     compile_rollout: bool = False
     compile_train_modules: bool = False
 
-    entropy_coef_start: float = 0.008
+    entropy_coef_start: float = 0.01
     entropy_coef_end: float = 0.002
-    entropy_decay_start: int = 500
-    entropy_decay_end: int = 3500
+    entropy_decay_start: float = 0.75
+    entropy_decay_end: float = 1.0
     init_noise_scale: float = 1.0
     load_noise_scale: float | None = None
 
@@ -795,14 +795,19 @@ class PPOPolicy(PPOBase):
 
         with ScopedTimer("training.policy.entropy_schedule", sync=False):
             current_iter = self._get_current_iter()
-            if current_iter <= self.cfg.entropy_decay_start:
+            total_iters = float(
+                getattr(self, "total_iters", getattr(self.env, "total_iters", 1))
+            )
+            entropy_decay_start = float(self.cfg.entropy_decay_start) * total_iters
+            entropy_decay_end = float(self.cfg.entropy_decay_end) * total_iters
+            if current_iter <= entropy_decay_start:
                 schedule_progress = 0.0
-            elif current_iter >= self.cfg.entropy_decay_end:
+            elif current_iter >= entropy_decay_end:
                 schedule_progress = 1.0
-            elif self.cfg.entropy_decay_end > self.cfg.entropy_decay_start:
+            elif entropy_decay_end > entropy_decay_start:
                 schedule_progress = float(
-                    (current_iter - self.cfg.entropy_decay_start)
-                    / (self.cfg.entropy_decay_end - self.cfg.entropy_decay_start)
+                    (current_iter - entropy_decay_start)
+                    / (entropy_decay_end - entropy_decay_start)
                 )
             else:
                 schedule_progress = 1.0
@@ -875,7 +880,7 @@ class PPOPolicy(PPOBase):
                 if control_kl > (
                     self.desired_kl * kl_high_threshold_ratio
                 ):
-                    self.lr_policy = max(5e-7, self.lr_policy / 1.2)
+                    self.lr_policy = self.lr_policy / 1.2
                 elif (
                     0.0 < mean_kl < self.desired_kl / 2.0
                     and (not tail_control or tail_kl < self.desired_kl)
