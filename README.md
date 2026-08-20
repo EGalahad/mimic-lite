@@ -118,7 +118,7 @@ uv --project venv/mjlab run \
   +task/patches=teacher_future_t16 \
   +exp=ppo_roa/finetune algo/ppo_roa/module=huge \
   task.num_envs=1 task.termination.root_pos_error.enabled=false \
-  checkpoint_path=<finetune-checkpoint>
+  checkpoint_path=run:elijahgalahad/mimic_lite/ece66d1a
 ```
 
 ## Troubleshooting
