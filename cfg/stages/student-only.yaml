@@ -6,8 +6,4 @@ stages:
       - +exp=ppo_roa/finetune
       - total_iters=5000
       - algo.freeze_vecnorm=false
-      - algo.entropy_coef_start=0.012
-      - algo.entropy_coef_end=0.001
-      - algo.entropy_decay_start=3000
-      - algo.entropy_decay_end=4000
     load_checkpoint_from_previous: false

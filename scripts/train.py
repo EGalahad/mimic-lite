@@ -46,16 +46,19 @@ def main(cfg: DictConfig):
     from active_adaptation.helpers import make_env_policy
     from active_adaptation.utils.helpers import EpisodeStats
 
-    env, policy = make_env_policy(cfg)
-    policy: PPOBase
-    requires_rollout_value = bool(getattr(policy, "requires_rollout_value", True))
-
-    frames_per_batch = env.num_envs * cfg.algo.train_every
+    num_envs = 1 if cfg.backend == "mujoco" else cfg.task.num_envs
+    frames_per_batch = num_envs * cfg.algo.train_every
     total_iters = cfg.get("total_iters", None)
     if total_iters is None:
         total_frames = cfg.get("total_frames", -1) // aa.get_world_size()
         total_frames = total_frames // frames_per_batch * frames_per_batch
         total_iters = total_frames // frames_per_batch
+    cfg.task.total_iters = total_iters
+
+    env, policy = make_env_policy(cfg)
+    policy: PPOBase
+    requires_rollout_value = bool(getattr(policy, "requires_rollout_value", True))
+
     env.total_iters = total_iters
     policy.total_iters = total_iters
 
@@ -177,6 +180,8 @@ def main(cfg: DictConfig):
             VecNorm.freeze(),
         ):
             tmp_carry = rollout_policy(carry.clone(True))
+            if tmp_carry.device.type == "cuda":
+                torch.cuda.empty_cache()
             tmp_td, _ = env.step_and_maybe_reset(tmp_carry.clone(False))
             tmp_td["next"] = tmp_td["next"].select(*next_saved_keys, strict=False)
 

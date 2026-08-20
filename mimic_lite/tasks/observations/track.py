@@ -110,13 +110,17 @@ class ref_joint_action(TrackObservation, namespace="mimic_lite"):
 
 # root_diff_obs
 
-class ref_root_pos_future_b(TrackObservation, namespace="mimic_lite"):
+class ref_root_pos_future_b(
+    _tracking_future_step_observation, namespace="mimic_lite"
+):
     """
     Reference root position in robot root frame
     """
 
     def compute(self):
-        return self.command_manager.ref_root_pos_future_b.view(self.num_envs, -1)
+        return self._select_future_steps(
+            self.command_manager.ref_root_pos_future_b
+        ).reshape(self.num_envs, -1)
 
 
 class ref_root_ori_future_b(_tracking_future_step_observation, namespace="mimic_lite"):

@@ -41,5 +41,6 @@ wandb:
 defaults:
   - task: tracking-base
   - algo: ppo_roa_train
+  - algo/ppo_roa/module: large
   - stages: normal
   - _self_

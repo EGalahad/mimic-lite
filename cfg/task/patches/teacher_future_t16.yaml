@@ -1,0 +1,20 @@
+# @package task
+
+command:
+  future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+  diff_future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+
+observation:
+  priv:
+    ref_root_pos_future_b:
+      future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+    ref_root_ori_future_b:
+      future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+    diff_body_pos_future_local:
+      future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+    diff_body_ori_future_local:
+      future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+    diff_body_lin_vel_future:
+      future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]
+    diff_body_ang_vel_future:
+      future_steps: [-8, -4, -2, 0, 1, 2, 3, 4, 8, 12, 16]

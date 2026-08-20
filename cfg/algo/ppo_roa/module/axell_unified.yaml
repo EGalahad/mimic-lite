@@ -1,7 +1,0 @@
-# @package algo
-
-encoder_teacher_dims: [512, 512]
-encoder_student_dims: [512, 512]
-actor_hidden_dims: [1024, 512, 512]
-critic_hidden_dims: [1024, 512, 512]
-latent_dim: 256

@@ -123,8 +123,8 @@ class SACConfig:
     target_entropy_sigma: float | None = None
     target_entropy_sigma_start: float | None = 0.4
     target_entropy_sigma_end: float | None = 0.25
-    target_entropy_decay_start: int = 3000
-    target_entropy_decay_end: int = 4000
+    target_entropy_decay_start: float = 0.6
+    target_entropy_decay_end: float = 0.8
 
     tau_actor: float = 0.1 # a relatively large value for faster convergence
     tau_Q: float = 0.02  # a relatively large value for faster convergence
@@ -175,9 +175,14 @@ class SACConfig:
             raise ValueError(
                 f"actor_loc_reg_power must be > 0, got {self.actor_loc_reg_power}."
             )
-        if self.target_entropy_decay_end < self.target_entropy_decay_start:
+        if not (
+            0.0
+            <= self.target_entropy_decay_start
+            <= self.target_entropy_decay_end
+            <= 1.0
+        ):
             raise ValueError(
-                "target_entropy_decay_end must be >= target_entropy_decay_start."
+                "target entropy decay fractions must satisfy 0 <= start <= end <= 1."
             )
 
 
@@ -444,9 +449,14 @@ class SAC(TensorDictModuleBase):
             raise ValueError(
                 f"actor_loc_reg_power must be > 0, got {self.cfg.actor_loc_reg_power}."
             )
-        if self.cfg.target_entropy_decay_end < self.cfg.target_entropy_decay_start:
+        if not (
+            0.0
+            <= self.cfg.target_entropy_decay_start
+            <= self.cfg.target_entropy_decay_end
+            <= 1.0
+        ):
             raise ValueError(
-                "target_entropy_decay_end must be >= target_entropy_decay_start."
+                "target entropy decay fractions must satisfy 0 <= start <= end <= 1."
             )
         self.grad_sync_mode = _normalize_grad_sync_mode(
             getattr(self.cfg, "grad_sync_mode", "manual")
@@ -746,8 +756,12 @@ class SAC(TensorDictModuleBase):
         if end is None:
             end = base if base is not None else start
         assert start is not None and end is not None
-        decay_start = int(self.cfg.target_entropy_decay_start)
-        decay_end = int(self.cfg.target_entropy_decay_end)
+        total_iters = float(
+            getattr(self, "total_iters", None)
+            or getattr(self.env, "total_iters", 1)
+        )
+        decay_start = float(self.cfg.target_entropy_decay_start) * total_iters
+        decay_end = float(self.cfg.target_entropy_decay_end) * total_iters
         if iteration <= decay_start:
             return float(start)
         if iteration >= decay_end:

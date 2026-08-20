@@ -83,7 +83,7 @@ class PPOConfig:
     policy_lr: float = 3e-4
     critic_lr: float = 3e-4
     desired_kl: float | None = 0.01
-    desired_kl_end: float | None = None
+    desired_kl_end: float | None = 0.005
     tail_kl_lr_control: bool = True
     kl_lr_high_threshold_ratio: float = 2.0
     epoch_kl_early_stop: bool = False
@@ -92,10 +92,10 @@ class PPOConfig:
     reg_warmup_start: int = 500
     reg_warmup_end: int = 1000
 
-    entropy_coef_start: float = 0.004
-    entropy_coef_end: float = 0.004
-    entropy_decay_start: int = 0
-    entropy_decay_end: int = 0
+    entropy_coef_start: float = 0.01
+    entropy_coef_end: float = 0.002
+    entropy_decay_start: float = 0.75
+    entropy_decay_end: float = 1.0
     init_noise_scale: float = 1.0
     load_noise_scale: float | None = None
 
@@ -143,6 +143,13 @@ class PPOConfig:
             self.desired_kl_end = float(self.desired_kl_end)
             if self.desired_kl_end <= 0:
                 raise ValueError("desired_kl_end must be positive")
+
+        self.entropy_decay_start = float(self.entropy_decay_start)
+        self.entropy_decay_end = float(self.entropy_decay_end)
+        if not 0.0 <= self.entropy_decay_start <= self.entropy_decay_end <= 1.0:
+            raise ValueError(
+                "entropy decay fractions must satisfy 0 <= start <= end <= 1"
+            )
 
         if isinstance(self.grad_sync_mode, str):
             self.grad_sync_mode = self.grad_sync_mode.lower()
@@ -192,6 +199,9 @@ class PPOROA(PPOBase):
         self.cfg = PPOConfig(**cfg)
         self.device = device
         self.observation_spec = observation_spec
+        total_iters = float(getattr(env.cfg, "total_iters", 1))
+        self.entropy_decay_start = self.cfg.entropy_decay_start * total_iters
+        self.entropy_decay_end = self.cfg.entropy_decay_end * total_iters
         assert self.cfg.phase in ["train", "adapt", "finetune"]
 
         self.desired_kl = self.cfg.desired_kl
@@ -570,7 +580,7 @@ class PPOROA(PPOBase):
         tail_control = self.cfg.tail_kl_lr_control
         control_kl = tail_kl if tail_control else mean_kl
         if control_kl > self.desired_kl * high_threshold_ratio:
-            self.lr_policy = max(5e-7, self.lr_policy / 1.2)
+            self.lr_policy = self.lr_policy / 1.2
         elif (
             0.0 < mean_kl < self.desired_kl / 2.0
             and (not tail_control or tail_kl < self.desired_kl)
@@ -604,7 +614,7 @@ class PPOROA(PPOBase):
         if mode == "deploy":
             modules[-1] = modules[-1].module[0]
             modules.append(MeanAction())
-            out_keys = [ACTION_KEY]
+            out_keys = [ACTION_KEY, PRIV_STUDENT_KEY]
         else:
             out_keys = [f"{ACTION_KEY}_log_prob", ACTION_KEY] + self.dist_keys
 
@@ -691,13 +701,20 @@ class PPOROA(PPOBase):
 
         with ScopedTimer("training.policy.schedules", sync=False):
             current_iter = self._get_current_iter()
-            self.entropy_coef = self._linear_schedule(
-                current_iter,
-                self.cfg.entropy_coef_start,
-                self.cfg.entropy_coef_end,
-                self.cfg.entropy_decay_start,
-                self.cfg.entropy_decay_end,
-            )
+            if current_iter <= self.entropy_decay_start:
+                schedule_progress = 0.0
+            elif current_iter >= self.entropy_decay_end:
+                schedule_progress = 1.0
+            elif self.entropy_decay_end > self.entropy_decay_start:
+                schedule_progress = float(
+                    (current_iter - self.entropy_decay_start)
+                    / (self.entropy_decay_end - self.entropy_decay_start)
+                )
+            else:
+                schedule_progress = 1.0
+            self.entropy_coef = self.cfg.entropy_coef_start + (
+                self.cfg.entropy_coef_end - self.cfg.entropy_coef_start
+            ) * schedule_progress
             self.reg_coef = self._linear_schedule(
                 current_iter,
                 0.0,
@@ -712,13 +729,9 @@ class PPOROA(PPOBase):
                     if self.cfg.desired_kl_end is None
                     else self.cfg.desired_kl_end
                 )
-                self.desired_kl = self._linear_schedule(
-                    current_iter,
-                    self.cfg.desired_kl,
-                    desired_kl_end,
-                    self.cfg.entropy_decay_start,
-                    self.cfg.entropy_decay_end,
-                )
+                self.desired_kl = self.cfg.desired_kl + (
+                    desired_kl_end - self.cfg.desired_kl
+                ) * schedule_progress
 
         with ScopedTimer("training.policy.minibatch_loop", sync=False):
             epochs_completed = 0

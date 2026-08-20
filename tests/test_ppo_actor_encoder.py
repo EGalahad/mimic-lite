@@ -138,7 +138,7 @@ class PPOActorEncoderTest(unittest.TestCase):
                 cfg.entropy_decay_start,
                 cfg.entropy_decay_end,
             ),
-            (0.008, 0.002, 500, 3500),
+            (0.01, 0.002, 0.75, 1.0),
         )
         self.assertEqual(cfg.grad_sync_mode, "ddp")
         self.assertEqual(cfg.train_amp_dtype, "bf16")

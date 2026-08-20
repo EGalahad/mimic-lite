@@ -74,36 +74,22 @@ Run single-stage PPO:
 
 ```bash
 bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=tracking-base task/motion=g1/mixture +exp=ppo/train backend=mjlab
+  task=tracking-base task/motion=g1/mixture +exp=ppo/train \
+  algo/ppo/module=huge backend=mjlab
 ```
 
-The recommended PPO defaults use the deployable encoder-decoder student,
-Muon, BF16/DDP, 5 epochs x 8 minibatches, joint actor gradient clipping at 4,
-and entropy `0.008 -> 0.002` from iteration 500 to 3500. Rollout and training
-module compilation are disabled: the RP1 factorial ablation found that both
-compiled branches learned worse tracking curves, while joint clipping without
-compile matched the PPO-ROA teacher.
+Run PPO-ROA sequential training (`train -> adapt -> finetune`) with the Huge
+module on one 8-GPU node:
 
-Select the actor observation mode through the module config:
-
-- Default direct student: `+exp=ppo/train`; the encoder consumes `policy` and
-  `command`, without privileged actor observations.
-- Privileged teacher diagnostic: add `algo/ppo/module=roa_teacher`; the encoder
-  consumes `priv` while the actor also consumes `policy`.
-- Original single-MLP actor: add an ordinary module such as
-  `algo/ppo/module=large`; it consumes `actor_in_keys` directly.
-
-Keep `algo.compile=false`, `algo.compile_rollout=false`, and
-`algo.compile_train_modules=false` unless compilation is revalidated with a
-new controlled training ablation. BF16 and DDP were separately cleared and
-should remain enabled.
-
-Each `motion_cfgs` entry controls partitioning and runtime storage independently:
-
-- `shard: true` gives each distributed rank a disjoint, motion-aligned subset; it defaults to `false`.
-- `full_motion: true` keeps the visible dataset resident in GPU memory, while `false` uses persistent window pools with asynchronous prefetching.
-
-The default G1 mixture enables sharding only for the full SONIC dataset.
+```bash
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
+uv --project venv/mjlab run \
+  projects/mimic-lite/scripts/train_sequential.py \
+  task/motion=g1/mixture \
+  +task/patches=teacher_future_t16 \
+  algo/ppo_roa/module=huge \
+  task.num_envs=8192
+```
 
 Play a PPO checkpoint:
 
@@ -113,6 +99,18 @@ uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
   +exp=ppo/train algo/ppo/module=huge \
   task.num_envs=4 task.termination.root_pos_error.enabled=false \
   checkpoint_path=run:elijahgalahad/mimic_lite/xua2csee
+```
+
+Play only the student from a PPO-ROA finetune checkpoint:
+
+```bash
+uv --project venv/mjlab run \
+  projects/mimic-lite/scripts/play.py \
+  task/motion=g1/lafan \
+  +task/patches=teacher_future_t16 \
+  +exp=ppo_roa/finetune algo/ppo_roa/module=huge \
+  task.num_envs=1 task.termination.root_pos_error.enabled=false \
+  checkpoint_path=<finetune-checkpoint>
 ```
 
 ## Troubleshooting

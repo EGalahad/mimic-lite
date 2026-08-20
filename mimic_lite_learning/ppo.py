@@ -203,6 +203,13 @@ class PPOConfig:
             if self.desired_kl_end <= 0:
                 raise ValueError("desired_kl_end must be positive")
 
+        self.entropy_decay_start = float(self.entropy_decay_start)
+        self.entropy_decay_end = float(self.entropy_decay_end)
+        if not 0.0 <= self.entropy_decay_start <= self.entropy_decay_end <= 1.0:
+            raise ValueError(
+                "entropy decay fractions must satisfy 0 <= start <= end <= 1"
+            )
+
         if isinstance(self.grad_sync_mode, str):
             self.grad_sync_mode = self.grad_sync_mode.lower()
             if self.grad_sync_mode in {"none", "null"}:
@@ -327,6 +334,9 @@ class PPOPolicy(PPOBase):
         self.cfg = PPOConfig(**cfg)
         self.device = device
         self.observation_spec = observation_spec
+        total_iters = float(getattr(env.cfg, "total_iters", 1))
+        self.entropy_decay_start = self.cfg.entropy_decay_start * total_iters
+        self.entropy_decay_end = self.cfg.entropy_decay_end * total_iters
 
         self.desired_kl = self.cfg.desired_kl
         self.clip_param = self.cfg.clip_param
@@ -795,19 +805,14 @@ class PPOPolicy(PPOBase):
 
         with ScopedTimer("training.policy.entropy_schedule", sync=False):
             current_iter = self._get_current_iter()
-            total_iters = float(
-                getattr(self, "total_iters", getattr(self.env, "total_iters", 1))
-            )
-            entropy_decay_start = float(self.cfg.entropy_decay_start) * total_iters
-            entropy_decay_end = float(self.cfg.entropy_decay_end) * total_iters
-            if current_iter <= entropy_decay_start:
+            if current_iter <= self.entropy_decay_start:
                 schedule_progress = 0.0
-            elif current_iter >= entropy_decay_end:
+            elif current_iter >= self.entropy_decay_end:
                 schedule_progress = 1.0
-            elif entropy_decay_end > entropy_decay_start:
+            elif self.entropy_decay_end > self.entropy_decay_start:
                 schedule_progress = float(
-                    (current_iter - entropy_decay_start)
-                    / (entropy_decay_end - entropy_decay_start)
+                    (current_iter - self.entropy_decay_start)
+                    / (self.entropy_decay_end - self.entropy_decay_start)
                 )
             else:
                 schedule_progress = 1.0

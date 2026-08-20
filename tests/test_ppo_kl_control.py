@@ -19,12 +19,12 @@ class PPOKLControlTest(unittest.TestCase):
         policy = object.__new__(PPOPolicy)
         nn.Module.__init__(policy)
         policy.cfg = SimpleNamespace(
-            entropy_decay_start=500,
-            entropy_decay_end=3500,
-            entropy_coef_start=0.008,
+            entropy_decay_start=0.75,
+            entropy_decay_end=1.0,
+            entropy_coef_start=0.01,
             entropy_coef_end=0.002,
             desired_kl=0.01,
-            desired_kl_end=None,
+            desired_kl_end=0.005,
             ppo_epochs=1,
             num_minibatches=1,
             tail_kl_lr_control=False,
@@ -32,6 +32,8 @@ class PPOKLControlTest(unittest.TestCase):
             epoch_kl_early_stop=False,
         )
         policy.device = torch.device("cpu")
+        policy.entropy_decay_start = 3000
+        policy.entropy_decay_end = 4000
         policy.critic = nn.Identity()
         policy.desired_kl = 0.01
         policy.lr_policy = 5.8142009840344475e-5
@@ -69,7 +71,7 @@ class PPOKLControlTest(unittest.TestCase):
     def test_defaults_enable_tail_control_without_cap_or_early_stop(self) -> None:
         cfg = PPOConfig()
         self.assertTrue(cfg.tail_kl_lr_control)
-        self.assertIsNone(cfg.desired_kl_end)
+        self.assertEqual(cfg.desired_kl_end, 0.005)
         self.assertEqual(cfg.kl_lr_high_threshold_ratio, 2.0)
         self.assertFalse(cfg.epoch_kl_early_stop)
 
@@ -86,9 +88,9 @@ class PPOKLControlTest(unittest.TestCase):
             "mimic_lite_learning.ppo.make_batch",
             side_effect=lambda batch, _: [batch],
         ):
-            before = self._policy(500).train_policy(self._batch())
-            middle = self._policy(2000).train_policy(self._batch())
-            after = self._policy(3500).train_policy(self._batch())
+            before = self._policy(3000).train_policy(self._batch())
+            middle = self._policy(3500).train_policy(self._batch())
+            after = self._policy(4000).train_policy(self._batch())
 
         self.assertAlmostEqual(before["actor/kl_high_threshold_ratio"], 2.0)
         self.assertAlmostEqual(middle["actor/kl_high_threshold_ratio"], 2.0)
@@ -99,13 +101,13 @@ class PPOKLControlTest(unittest.TestCase):
             "mimic_lite_learning.ppo.make_batch",
             side_effect=lambda batch, _: [batch],
         ):
-            before_policy = self._policy(500)
+            before_policy = self._policy(3000)
             before_policy.cfg.desired_kl_end = 0.003
             before = before_policy.train_policy(self._batch())
-            middle_policy = self._policy(2000)
+            middle_policy = self._policy(3500)
             middle_policy.cfg.desired_kl_end = 0.003
             middle = middle_policy.train_policy(self._batch())
-            after_policy = self._policy(3500)
+            after_policy = self._policy(4000)
             after_policy.cfg.desired_kl_end = 0.003
             after = after_policy.train_policy(self._batch())
 
@@ -256,7 +258,7 @@ class PPOKLControlTest(unittest.TestCase):
             5.8142009840344475e-5 / 1.2,
         )
 
-    def test_tail_controller_lr_floor_is_5e_7(self) -> None:
+    def test_tail_controller_has_no_lr_floor(self) -> None:
         policy = self._policy(100)
         policy.cfg.tail_kl_lr_control = True
         policy.lr_policy = 5.1e-7
@@ -275,8 +277,10 @@ class PPOKLControlTest(unittest.TestCase):
         ):
             policy.train_policy(self._batch())
 
-        self.assertEqual(policy.lr_policy, 5e-7)
-        self.assertEqual(policy.opt_policy.param_groups[0]["lr"], 5e-7)
+        self.assertAlmostEqual(policy.lr_policy, 4.25e-7)
+        self.assertEqual(
+            policy.opt_policy.param_groups[0]["lr"], policy.lr_policy
+        )
 
     def test_tail_controller_requires_low_tail_before_increasing_lr(self) -> None:
         policy = self._policy(100)

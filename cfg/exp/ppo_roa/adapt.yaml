@@ -1,7 +1,7 @@
 # @package _global_
 
 defaults:
-  - /algo/ppo_roa/module: axell_unified
+  - /algo/ppo_roa/module: large
   - override /algo: ppo_roa_adapt
 
 total_iters: 500
