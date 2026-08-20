@@ -73,13 +73,6 @@ Download the MimicLite v1.1 deploy ONNX and YAML from the
 
 ![Canonical cross-codebase tracking evaluation](assets/mimic_lite_cross_codebase_tracking_eval.png)
 
-The canonical comparison uses LAFAN-40, PHUMA-30, and Root-90. Local body
-error is reported independently on PHUMA-30 and Root-90. Normalized tracking
-return sums the common BeyondMimic body-position and body-orientation rewards
-before anchor termination, then divides by the full reference length.
-The [termination-free companion](assets/mimic_lite_cross_codebase_tracking_eval_all_step_reward.png)
-averages the same reward over every motion step.
-
 ## Train
 
 Run single-stage PPO:
