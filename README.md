@@ -91,6 +91,8 @@ uv --project venv/mjlab run \
   task.num_envs=8192
 ```
 
+If this runs out of memory, append `task.command.diff_future_steps=[0,1]`.
+
 Play a PPO checkpoint:
 
 ```bash
