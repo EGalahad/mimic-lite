@@ -26,6 +26,7 @@ from torchrl.modules import ProbabilisticActor
 import active_adaptation as aa
 from active_adaptation.learning.modules.distributions import IndependentNormal
 from active_adaptation.learning.modules.vecnorm import VecNorm
+from active_adaptation.learning.modules import CatTensors
 from active_adaptation.learning.ppo.common import (
     ACTION_KEY,
     CMD_KEY,
@@ -34,7 +35,6 @@ from active_adaptation.learning.ppo.common import (
     OBS_PRIV_KEY,
     REWARD_KEY,
     TERM_KEY,
-    CatTensors,
     GAE,
     make_batch,
     make_mlp,
@@ -68,7 +68,7 @@ PROFILE_SYNC_TIMERS = os.environ.get("AA_PROFILE_SYNC_TIMERS", "0").lower() in {
 
 @dataclass
 class PPOConfig:
-    _target_: str = f"{__package__}.ppo_roa.PPOROA"
+    _target_: str = f"{__package__}.ppo_roa.PPOConfig"
     name: str = "ppo_roa"
     train_every: int = 32
     ppo_epochs: int = 5
@@ -179,6 +179,9 @@ class PPOConfig:
                 f"got {self.train_amp_dtype!r}"
             )
 
+    def get_class(self):
+        return PPOROA
+
 cs = ConfigStore.instance()
 cs.store("ppo_roa_train", node=PPOConfig(phase="train"), group="algo")
 cs.store("ppo_roa_adapt", node=PPOConfig(phase="adapt"), group="algo")
@@ -196,7 +199,8 @@ class PPOROA(PPOBase):
         env,
     ):
         super().__init__()
-        self.cfg = PPOConfig(**cfg)
+        cfg_dict = dict(vars(cfg) if isinstance(cfg, PPOConfig) else cfg)
+        self.cfg = PPOConfig(**cfg_dict)
         self.device = device
         self.observation_spec = observation_spec
         total_iters = float(getattr(env.cfg, "total_iters", 1))

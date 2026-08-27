@@ -231,7 +231,14 @@ def main(cfg: DictConfig) -> None:
     if checkpoint_path is not None:
         cfg.checkpoint_path = checkpoint_path
 
-    env, policy = make_env_policy(cfg)
+    env, policy = make_env_policy(
+        cfg.task,
+        cfg.algo,
+        seed=cfg.seed,
+        headless=cfg.headless,
+        device=cfg.device,
+        checkpoint_path=cfg.get("checkpoint_path", None),
+    )
     result = fixed_step_eval(cfg, env, policy)
 
     output_path = Path(cfg.get("eval_output", "eval_rollout.pt")).resolve()

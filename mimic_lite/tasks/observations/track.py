@@ -1,8 +1,8 @@
 from mimic_lite.tasks.command import RobotTracking
 from mimic_lite.tasks.actions import JointPosition
 
-from active_adaptation.envs.mdp.observations.base import Observation as BaseObservation
-from active_adaptation.envs.utils import find_bodies
+from active_adaptation.utils.string import resolve_matching_names
+from mimic_lite.tasks.deferred import DeferredObservation as BaseObservation
 
 import torch
 from typing import cast, List
@@ -11,15 +11,10 @@ TrackObservation = BaseObservation[RobotTracking]
 
 
 def _select_available_body_names(
-    asset,
     available_body_names: list[str],
     body_names: List[str] | str,
 ) -> tuple[list[int], list[str]]:
-    _, matched_body_names = find_bodies(asset, body_names)
-    matched_name_set = set(matched_body_names)
-    selected_body_names = [
-        body_name for body_name in available_body_names if body_name in matched_name_set
-    ]
+    _, selected_body_names = resolve_matching_names(body_names, available_body_names)
     if not selected_body_names:
         raise ValueError("No tracking body matched for observation.")
     selected_body_indices = [
@@ -29,13 +24,11 @@ def _select_available_body_names(
 
 
 class _tracking_future_step_observation(TrackObservation):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         future_steps: List[int] | int | None = None,
         **kwargs,
     ):
-        super().__init__(env, **kwargs)
         if future_steps is None:
             future_steps = self.command_manager.future_steps.tolist()
         elif isinstance(future_steps, int):
@@ -62,8 +55,8 @@ class _tracking_future_step_observation(TrackObservation):
 
 
 class ref_joint_pos_future(_tracking_future_step_observation, namespace="mimic_lite"):
-    def __init__(self, env, noise_std=0.0, **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(self, noise_std=0.0, **kwargs):
+        super()._initialize_impl(**kwargs)
         self.noise_std = noise_std
         
     def compute(self):
@@ -85,8 +78,7 @@ class ref_joint_vel_future(_tracking_future_step_observation, namespace="mimic_l
 
 
 class ref_joint_action(TrackObservation, namespace="mimic_lite"):
-    def __init__(self, env, **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(self, **kwargs):
         action_manager = cast(JointPosition, self.env.action_manager)
         self.action_joint_ids = action_manager.joint_ids
         self.action_indices_motion = [
@@ -128,8 +120,8 @@ class ref_root_ori_future_b(_tracking_future_step_observation, namespace="mimic_
     Reference root orientation in robot root frame
     """
 
-    def __init__(self, env, noise_std=0.0, **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(self, noise_std=0.0, **kwargs):
+        super()._initialize_impl(**kwargs)
         self.noise_std = noise_std
 
     def compute(self):
@@ -150,14 +142,12 @@ class _tracking_body_future_observation(TrackObservation):
     available_body_names_attr = "tracking_body_names"
     available_future_steps_attr = "future_steps"
 
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         body_names: List[str] | str | None = None,
         future_steps: List[int] | int | None = None,
         **kwargs,
     ):
-        super().__init__(env, **kwargs)
         available_body_names = list(
             getattr(self.command_manager, self.available_body_names_attr)
         )
@@ -171,7 +161,6 @@ class _tracking_body_future_observation(TrackObservation):
             future_steps = [future_steps]
 
         body_indices_tracking, matched_body_names = _select_available_body_names(
-            self.command_manager.asset,
             available_body_names,
             body_names,
         )
@@ -213,8 +202,8 @@ class ref_body_pos_future_local(
     """
     Reference body position in the projected-yaw anchor frame.
     """
-    def __init__(self, env, noise_std=0.0, **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(self, noise_std=0.0, **kwargs):
+        super()._initialize_impl(**kwargs)
         self.noise_std = noise_std
 
     def compute(self):

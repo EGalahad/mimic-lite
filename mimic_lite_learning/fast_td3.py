@@ -27,6 +27,7 @@ from torchrl.envs.transforms import TensorDictPrimer
 
 import active_adaptation as aa
 from active_adaptation.learning.modules.vecnorm import VecNorm
+from active_adaptation.learning.modules import CatTensors
 from active_adaptation.learning.ppo.common import (
     ACTION_KEY,
     CMD_KEY,
@@ -34,7 +35,6 @@ from active_adaptation.learning.ppo.common import (
     OBS_KEY,
     OBS_PRIV_KEY,
     REWARD_KEY,
-    CatTensors,
 )
 from active_adaptation.learning.ppo.ppo_base import PPOBase
 
@@ -213,7 +213,7 @@ class TD3ExplorationNoise(nn.Module):
 
 @dataclass
 class FastTD3Config:
-    _target_: str = f"{__package__}.fast_td3.FastTD3"
+    _target_: str = f"{__package__}.fast_td3.FastTD3Config"
 
     name: str = "fast_td3"
     collect_steps: int = 1
@@ -278,9 +278,12 @@ class FastTD3Config:
             action_max=self.action_max,
         )
 
+    def get_class(self):
+        return FastTD3
+
 
 cs = ConfigStore.instance()
-cs.store("fast_td3", node=FastTD3Config(), group="algo")
+cs.store("fast_td3", node=FastTD3Config, group="algo")
 
 
 class FastTD3(PPOBase):
@@ -294,7 +297,8 @@ class FastTD3(PPOBase):
         env,
     ) -> None:
         super().__init__()
-        self.cfg = FastTD3Config(**cfg)
+        cfg_dict = dict(vars(cfg) if isinstance(cfg, FastTD3Config) else cfg)
+        self.cfg = FastTD3Config(**cfg_dict)
         if aa.is_distributed() and self.cfg.grad_sync_mode == "ddp":
             raise NotImplementedError("FastTD3 only supports manual gradient sync.")
 
@@ -313,6 +317,15 @@ class FastTD3(PPOBase):
         self.action_dim = int(env.action_manager.action_dim)
         self.joint_names = env.action_manager.joint_names
         self.gradient_step = 0
+        self.actor_obs_keys: Tuple[str, ...] = (OBS_KEY, CMD_KEY)
+        self.critic_obs_keys: Tuple[str, ...] = (OBS_KEY, CMD_KEY, OBS_PRIV_KEY)
+        self.actor_input_dim = sum(
+            int(observation_spec[key].shape[-1]) for key in self.actor_obs_keys
+        )
+        self.critic_obs_dim = sum(
+            int(observation_spec[key].shape[-1]) for key in self.critic_obs_keys
+        )
+        self.critic_input_dim = self.critic_obs_dim + self.action_dim
 
         self._build_vecnorm_modules(observation_spec)
 
@@ -354,6 +367,7 @@ class FastTD3(PPOBase):
                     sort=False,
                 ),
                 DistributionalCritic(
+                    input_dim=self.critic_obs_dim + self.action_dim,
                     num_atoms=self.cfg.num_atoms,
                     hidden_dim=self.cfg.critic_hidden_dim,
                     use_layer_norm=self.cfg.use_layer_norm,
@@ -750,8 +764,9 @@ class FastTD3(PPOBase):
     def make_tensordict_primer(self):
         return TensorDictPrimer({}, reset_key="done", expand_specs=False)
 
-    def on_stage_start(self, stage: str) -> None:
+    def on_stage_start(self, stage: str, env=None) -> None:
         del stage
+        del env
         return None
 
     def get_rollout_policy(self, mode: str = "train", critic: bool = False):

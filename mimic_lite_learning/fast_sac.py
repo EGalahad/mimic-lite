@@ -28,6 +28,7 @@ import active_adaptation as aa
 from active_adaptation.learning.modules.distributions import TanhNormalWithEntropy
 from active_adaptation.learning.modules.common import MLP
 from active_adaptation.learning.modules.vecnorm import VecNorm
+from active_adaptation.learning.modules import CatTensors
 from active_adaptation.learning.ppo.common import (
     ACTION_KEY,
     CMD_KEY,
@@ -37,7 +38,6 @@ from active_adaptation.learning.ppo.common import (
     OBS_KEY,
     OBS_PRIV_KEY,
     REWARD_KEY,
-    CatTensors,
 )
 from active_adaptation.learning.ppo.ppo_base import PPOBase
 
@@ -146,7 +146,7 @@ def _build_mlp(
 
 @dataclass
 class FastSACConfig:
-    _target_: str = f"{__package__}.fast_sac.FastSAC"
+    _target_: str = f"{__package__}.fast_sac.FastSACConfig"
 
     name: str = "fast_sac"
     train_every: int = 2
@@ -297,9 +297,12 @@ class FastSACConfig:
             action_max=self.action_max,
         )
 
+    def get_class(self):
+        return FastSAC
+
 
 cs = ConfigStore.instance()
-cs.store("fast_sac", node=FastSACConfig(), group="algo")
+cs.store("fast_sac", node=FastSACConfig, group="algo")
 
 
 class FastSAC(PPOBase):
@@ -313,7 +316,8 @@ class FastSAC(PPOBase):
         env,
     ) -> None:
         super().__init__()
-        self.cfg = FastSACConfig(**cfg)
+        cfg_dict = dict(vars(cfg) if isinstance(cfg, FastSACConfig) else cfg)
+        self.cfg = FastSACConfig(**cfg_dict)
         self.requires_rollout_value = False
         if aa.is_distributed() and self.cfg.grad_sync_mode == "ddp":
             raise NotImplementedError("FastSAC only supports manual gradient sync.")
@@ -668,8 +672,9 @@ class FastSAC(PPOBase):
     def make_tensordict_primer(self):
         return TensorDictPrimer({}, reset_key="done", expand_specs=False)
 
-    def on_stage_start(self, stage: str) -> None:
+    def on_stage_start(self, stage: str, env=None) -> None:
         del stage
+        del env
         return None
 
     def _append_rollout_to_replay(self, tensordict: TensorDictBase) -> None:

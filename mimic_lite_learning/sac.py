@@ -24,7 +24,7 @@ from torchrl.objectives import hold_out_net
 
 import active_adaptation as aa
 from active_adaptation.learning.modules import (
-    AmpSafeRMSNorm,
+    CatTensors,
     ConditionalBlock,
     IndependentNormal,
     MLP,
@@ -41,7 +41,6 @@ from active_adaptation.learning.ppo.common import (
     OBS_PRIV_KEY,
     REWARD_KEY,
     TERM_KEY,
-    CatTensors,
     soft_copy_,
 )
 
@@ -83,7 +82,7 @@ def _init_sac_linear(m: nn.Module, gain: float = 1.0):
 
 @dataclass
 class SACConfig:
-    _target_: str = "mimic_lite_learning.sac.SAC"
+    _target_: str = "mimic_lite_learning.sac.SACConfig"
     name: str = "mimic_lite_sac"
     train_every: int = 4
     buffer_size: int = 2000
@@ -185,6 +184,9 @@ class SACConfig:
                 "target entropy decay fractions must satisfy 0 <= start <= end <= 1."
             )
 
+    def get_class(self):
+        return SAC
+
 
 def _same_width_residual_stack(
     input_dim: int,
@@ -256,14 +258,14 @@ class TwinQNetwork(nn.Module):
             critic_input_dim,
             hidden_dims,
             1,
-            norm_cls=AmpSafeRMSNorm,
+            norm_cls=nn.RMSNorm,
             activation=activation,
         )
         self.critic_2 = _same_width_residual_stack(
             critic_input_dim,
             hidden_dims,
             1,
-            norm_cls=AmpSafeRMSNorm,
+            norm_cls=nn.RMSNorm,
             activation=activation,
         )
         self.reset_parameters()
@@ -324,7 +326,7 @@ class TwinDistributionalQNetwork(nn.Module):
                     critic_input_dim,
                     hidden_dims,
                     num_atoms,
-                    norm_cls=AmpSafeRMSNorm,
+                    norm_cls=nn.RMSNorm,
                     activation=activation,
                 )
 
@@ -413,6 +415,18 @@ class TanhNormalActor(nn.Module):
 
 
 class SAC(TensorDictModuleBase):
+    @classmethod
+    def from_env(cls, cfg: SACConfig, env, device):
+        runtime_env = getattr(env, "base_env", env)
+        return cls(
+            cfg=cfg,
+            observation_spec=env.observation_spec,
+            action_spec=env.action_spec,
+            reward_spec=env.reward_spec,
+            device=device,
+            env=runtime_env,
+        )
+
     def __init__(
         self,
         cfg: SACConfig,
@@ -864,7 +878,8 @@ class SAC(TensorDictModuleBase):
 
         return policy
 
-    def on_stage_start(self, stage: str):
+    def on_stage_start(self, stage: str, env=None):
+        del env
         self.enable_actor = True
 
     def train_op(self, tensordict: TensorDict):

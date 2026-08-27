@@ -18,31 +18,16 @@ class JointPosition(Action, namespace="mimic_lite"):
 
     def __init__(
         self,
-        env,
         action_scaling: float | Dict[str, float] = 0.5,
         min_delay: int = 0,
         max_delay: int = 0,
         alpha: float | Sequence[float] | None = None,
         alpha_range: Tuple[float, float] = (0.5, 1.0),
     ):
-        super().__init__(env)
-
-        if isinstance(action_scaling, float):
-            action_scaling = {".*": float(action_scaling)}
-        # Keep policy/action interface joint order in simulation convention,
-        _, self.joint_names, scaling = string_utils.resolve_matching_names_values(
-            dict(action_scaling), self.asset.cfg.joint_names_simulation
-        )
-        # then map names to asset-local joint indices for tensor indexing.
-        self.joint_ids = torch.tensor(
-            [self.asset.joint_names.index(name) for name in self.joint_names],
-            device=self.device,
-        )
-        self.action_scaling = torch.tensor(scaling, device=self.device)
-
+        super().__init__()
+        self._action_scaling_cfg = action_scaling
         self.min_delay = int(min_delay) if min_delay is not None else 0
         self.max_delay = int(max_delay) if max_delay is not None else 0
-
         if alpha is not None:
             if isinstance(alpha, (float, int)):
                 self.alpha_range = (float(alpha), float(alpha))
@@ -51,8 +36,21 @@ class JointPosition(Action, namespace="mimic_lite"):
         else:
             self.alpha_range = (float(alpha_range[0]), float(alpha_range[1]))
 
+    def _initialize(self, env) -> None:
+        super()._initialize(env)
+        action_scaling = self._action_scaling_cfg
+        if isinstance(action_scaling, float):
+            action_scaling = {".*": float(action_scaling)}
+        _, self.joint_names, scaling = string_utils.resolve_matching_names_values(
+            dict(action_scaling), self.asset.cfg.joint_names_simulation
+        )
+        self.joint_ids = torch.tensor(
+            [self.asset.joint_names.index(name) for name in self.joint_names],
+            device=self.device,
+        )
+        self.action_scaling = torch.tensor(scaling, device=self.device)
+        self.names = list(self.joint_names)
         self.default_joint_pos = self.asset.data.default_joint_pos.clone()
-
         delay_hist = max((self.max_delay - 1) // self.env.decimation + 1, 3)
         with torch.device(self.device):
             self.action_buf = torch.zeros(self.num_envs, delay_hist, self.action_dim)

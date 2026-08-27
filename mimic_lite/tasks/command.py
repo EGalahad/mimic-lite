@@ -60,11 +60,12 @@ class VizCfg:
 class RobotTracking(Command, namespace="mimic_lite"):
     def __init__(
         self,
-        env,
         motion_cfgs: Mapping[str, object],
         tracking_body_names: List[str],
         tracking_joint_names: List[str],
         obs_body_names: List[str] | None = None,
+        extra_motion_body_names: List[str] | None = None,
+        extra_motion_joint_names: List[str] | None = None,
         # reset parameters
         # will be offloaded to a dedicated randomization module in the future
         root_body_name: str = "pelvis",
@@ -101,62 +102,19 @@ class RobotTracking(Command, namespace="mimic_lite"):
     ):
         for module_name in (".observations", ".rewards", ".terminations"):
             importlib.import_module(module_name, package=__package__)
-
-        super().__init__(env)
+        super().__init__()
         self.motion_cfgs: list[MotionDatasetConfig] = normalize_motion_cfgs(motion_cfgs)
+        self._tracking_body_names_cfg = list(tracking_body_names)
+        self._tracking_joint_names_cfg = list(tracking_joint_names)
+        self._obs_body_names_cfg = None if obs_body_names is None else list(obs_body_names)
+        self._extra_motion_body_names = list(extra_motion_body_names or ())
+        self._extra_motion_joint_names = list(extra_motion_joint_names or ())
+        self._windowed_next_window_device = windowed_next_window_device
+        self._windowed_pin_window_load = windowed_pin_window_load
+        self._call_update = call_update
 
         # Resolve the exact asset names before loading motion data so large
         # windowed datasets can skip body/joint fields this task never reads.
-        tracking_body_indices_asset, self.tracking_body_names = find_bodies(
-            self.asset, tracking_body_names
-        )
-        if obs_body_names is None:
-            obs_body_names = self.tracking_body_names
-        _, self.obs_body_names = find_bodies(self.asset, obs_body_names)
-        tracking_joint_indices_asset, self.tracking_joint_names = find_joints(
-            self.asset, tracking_joint_names
-        )
-
-        motion_body_names = list(dict.fromkeys([
-            *self.tracking_body_names,
-            root_body_name,
-            anchor_body_name,
-        ]))
-        motion_joint_names = list(self.asset.joint_names)
-
-        self.dataset = load_motion_dataset_collection(
-            self.motion_cfgs,
-            create_dataset_fn=create_dataset_from_path,
-            target_fps=int(1 / self.env.step_dt),
-            num_envs=self.num_envs,
-            body_names=motion_body_names,
-            joint_names=motion_joint_names,
-            windowed_next_window_device=windowed_next_window_device,
-            windowed_pin_window_load=windowed_pin_window_load,
-        ).to(self.device)
-        print(
-            "[mimic_lite][motion_dataset]"
-            f" pruned bodies={len(self.dataset.body_names)}"
-            f" joints={len(self.dataset.joint_names)}"
-        )
-
-        # Set tracking body and joint names for observation and termination
-        self.tracking_body_indices_motion = [
-            self.dataset.body_names.index(name) for name in self.tracking_body_names
-        ]
-        self.tracking_body_indices_asset = list(tracking_body_indices_asset)
-
-        self.obs_body_indices_tracking = torch.tensor(
-            [self.tracking_body_names.index(name) for name in self.obs_body_names],
-            dtype=torch.long,
-            device=self.device,
-        )
-
-        self.tracking_joint_indices_motion = [
-            self.dataset.joint_names.index(name) for name in self.tracking_joint_names
-        ]
-        self.tracking_joint_indices_asset = list(tracking_joint_indices_asset)
-
         future_steps = sorted(future_steps)
         assert 0 in future_steps, "future_steps must include 0 to compute current observation"
         assert 1 in future_steps, "future_steps must include 1 to compute current reward"
@@ -169,8 +127,97 @@ class RobotTracking(Command, namespace="mimic_lite"):
             )
 
         self.anchor_body_name = anchor_body_name
-        self.anchor_body_idx_motion = self.dataset.body_names.index(anchor_body_name)
-        self.anchor_body_idx_asset = self.asset.body_names.index(anchor_body_name)
+        self._future_steps_cfg = list(future_steps)
+        self._diff_future_steps_cfg = list(diff_future_steps)
+
+        # get root body and joint indices in motion for reset
+        self.root_body_name = root_body_name
+
+        range_keys = ("x", "y", "z", "roll", "pitch", "yaw")
+        self._pose_range_cfg = [pose_range.get(key, (0.0, 0.0)) for key in range_keys]
+        self._velocity_range_cfg = [
+            velocity_range.get(key, (0.0, 0.0)) for key in range_keys
+        ]
+
+        self.init_joint_pos_noise = init_joint_pos_noise
+        self.init_joint_vel_noise = init_joint_vel_noise
+
+        self.rewind_prob = rewind_prob
+        self.rewind_steps_range: Tuple[int, int] = tuple(rewind_steps_range)
+        assert self.rewind_steps_range[0] >= 0
+        assert self.rewind_steps_range[1] > self.rewind_steps_range[0]
+
+        self.first_sample_motion = True
+        self.replay_motion = replay_motion
+        self.start_from_zero = start_from_zero
+
+        if isinstance(viz, dict):
+            viz = VizCfg(**viz)
+        self.viz = viz or VizCfg()
+        self._ghost_model = None
+
+    def _initialize(self, env) -> None:
+        super()._initialize(env)
+        tracking_body_indices_asset, self.tracking_body_names = find_bodies(
+            self.asset, self._tracking_body_names_cfg
+        )
+        obs_body_names = self._obs_body_names_cfg or self.tracking_body_names
+        _, self.obs_body_names = find_bodies(self.asset, obs_body_names)
+        tracking_joint_indices_asset, self.tracking_joint_names = find_joints(
+            self.asset, self._tracking_joint_names_cfg
+        )
+
+        motion_body_names = list(
+            dict.fromkeys(
+                [
+                    *self.tracking_body_names,
+                    *self._extra_motion_body_names,
+                    self.root_body_name,
+                    self.anchor_body_name,
+                ]
+            )
+        )
+        motion_joint_names = list(
+            dict.fromkeys([*self.asset.joint_names, *self._extra_motion_joint_names])
+        )
+        self.dataset = load_motion_dataset_collection(
+            self.motion_cfgs,
+            create_dataset_fn=create_dataset_from_path,
+            target_fps=int(1 / self.env.step_dt),
+            num_envs=self.num_envs,
+            body_names=motion_body_names,
+            joint_names=motion_joint_names,
+            windowed_next_window_device=self._windowed_next_window_device,
+            windowed_pin_window_load=self._windowed_pin_window_load,
+        ).to(self.device)
+        print(
+            "[mimic_lite][motion_dataset]"
+            f" pruned bodies={len(self.dataset.body_names)}"
+            f" joints={len(self.dataset.joint_names)}"
+        )
+
+        self.tracking_body_indices_motion = [
+            self.dataset.body_names.index(name) for name in self.tracking_body_names
+        ]
+        self.tracking_body_indices_asset = list(tracking_body_indices_asset)
+        self.obs_body_indices_tracking = torch.tensor(
+            [self.tracking_body_names.index(name) for name in self.obs_body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
+        self.tracking_joint_indices_motion = [
+            self.dataset.joint_names.index(name) for name in self.tracking_joint_names
+        ]
+        self.tracking_joint_indices_asset = list(tracking_joint_indices_asset)
+        self.anchor_body_idx_motion = self.dataset.body_names.index(self.anchor_body_name)
+        self.anchor_body_idx_asset = self.asset.body_names.index(self.anchor_body_name)
+        self.root_body_idx_motion = self.dataset.body_names.index(self.root_body_name)
+        self.asset_joint_idx_motion = [
+            self.dataset.joint_names.index(joint_name)
+            for joint_name in self.asset.joint_names
+        ]
+        self.pose_range = torch.tensor(self._pose_range_cfg, device=self.device)
+        self.velocity_range = torch.tensor(self._velocity_range_cfg, device=self.device)
 
         if self.env.backend == "mjlab":
             indexing = self.asset.data.indexing
@@ -203,56 +250,22 @@ class RobotTracking(Command, namespace="mimic_lite"):
             self.motion_ids = torch.zeros(self.num_envs, dtype=torch.long)
             self.motion_len = torch.zeros(self.num_envs, dtype=torch.long)
             self.t = torch.zeros(self.num_envs, dtype=torch.long)
-            self.future_steps = torch.tensor(future_steps)
-            self.diff_future_steps = torch.tensor(diff_future_steps)
+            self.future_steps = torch.tensor(self._future_steps_cfg)
+            self.diff_future_steps = torch.tensor(self._diff_future_steps_cfg)
             self.future_one_step = torch.zeros(1, dtype=torch.long)
             self.diff_future_step_indices = torch.tensor(
-                [future_steps.index(step) for step in diff_future_steps],
+                [
+                    self._future_steps_cfg.index(step)
+                    for step in self._diff_future_steps_cfg
+                ],
                 dtype=torch.long,
             )
+            self.all_env_ids = torch.arange(self.num_envs, device=self.device)
 
-        # get root body and joint indices in motion for reset
-        self.root_body_name = root_body_name
-        self.root_body_idx_motion = self.dataset.body_names.index(root_body_name)
-        self.asset_joint_idx_motion = [
-            self.dataset.joint_names.index(joint_name)
-            for joint_name in self.asset.joint_names
-        ]
-
-        range_keys = ("x", "y", "z", "roll", "pitch", "yaw")
-        self.pose_range = torch.tensor(
-            [pose_range.get(key, (0.0, 0.0)) for key in range_keys],
-            device=self.device,
-        )
-        self.velocity_range = torch.tensor(
-            [velocity_range.get(key, (0.0, 0.0)) for key in range_keys],
-            device=self.device,
-        )
-
-        self.init_joint_pos_noise = init_joint_pos_noise
-        self.init_joint_vel_noise = init_joint_vel_noise
-
-        self.rewind_prob = rewind_prob
-        self.rewind_steps_range: Tuple[int, int] = tuple(rewind_steps_range)
-        assert self.rewind_steps_range[0] >= 0
-        assert self.rewind_steps_range[1] > self.rewind_steps_range[0]
-
-        self.first_sample_motion = True
-        self.replay_motion = replay_motion
-        self.start_from_zero = start_from_zero
-
-        self.all_env_ids = torch.arange(self.num_envs, device=self.device)
-
-        if call_update:
+        if self._call_update:
             self._read_current_robot_state()
             self._refresh_future_buffers()
             self.update()
-
-        # TODO: simplify viz config
-        if isinstance(viz, dict):
-            viz = VizCfg(**viz)
-        self.viz = viz or VizCfg()
-        self._ghost_model = None
 
     def _sample_motions(
         self,

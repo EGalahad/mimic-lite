@@ -38,7 +38,14 @@ def main(cfg: DictConfig):
     from active_adaptation.helpers import make_env_policy
     from active_adaptation.utils.helpers import EpisodeStats
 
-    env, policy = make_env_policy(cfg)
+    env, policy = make_env_policy(
+        cfg.task,
+        cfg.algo,
+        seed=cfg.seed,
+        headless=cfg.headless,
+        device=cfg.device,
+        checkpoint_path=cfg.get("checkpoint_path", None),
+    )
 
     frames_per_iter = env.num_envs * cfg.algo.collect_steps
     total_iters = cfg.get("total_iters", None)

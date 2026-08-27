@@ -1,11 +1,11 @@
-from active_adaptation.assets.asset_cfg import (
-    ActuatorCfg,
-    AssetCfg,
-    ContactSensorCfg,
-    InitialStateCfg,
-    MjlabCollisionCfg,
+from dataclasses import dataclass
+
+from active_adaptation.assets.humanoids.g1 import (
+    BODY_NAMES_SIMULATION,
+    JOINT_NAMES_SIMULATION,
+    JOINT_SYMMETRY_MAPPING,
+    SPATIAL_SYMMETRY_MAPPING,
 )
-from active_adaptation.assets.humanoid import G1_WAIST_UNLOCKED_CFG
 from active_adaptation.registry import Registry
 
 from mjhub import resolve_asset_reference
@@ -95,11 +95,22 @@ def _damping(armature: float) -> float:
     return 2.0 * DAMPING_RATIO * armature * NATURAL_FREQ
 
 
-def _motor_actuator(joint_names_expr: str, effort: float, velocity: float, armature: float) -> ActuatorCfg:
-    return ActuatorCfg(
+@dataclass(frozen=True)
+class _MotorSpec:
+    joint_names_expr: str
+    effort_limit: float
+    velocity_limit: float
+    stiffness: float
+    damping: float
+    friction: float
+    armature: float
+
+
+def _motor_actuator(joint_names_expr: str, effort: float, velocity: float, armature: float) -> _MotorSpec:
+    return _MotorSpec(
         joint_names_expr=joint_names_expr,
-        effort_limit=effort,
-        velocity_limit=velocity,
+        effort_limit=float(effort),
+        velocity_limit=float(velocity),
         stiffness=_stiffness(armature),
         damping=_damping(armature),
         friction=0.01,
@@ -176,9 +187,8 @@ G1_ACTUATOR_ANKLE = _motor_actuator(
 )
 
 
-KNEES_BENT_KEYFRAME = InitialStateCfg(
-    pos=(0.0, 0.0, 0.76),
-    joint_pos={
+INIT_POS = (0.0, 0.0, 0.76)
+INIT_JOINT_POS = {
         ".*_hip_pitch_joint": -0.312,
         ".*_knee_joint": 0.669,
         ".*_ankle_pitch_joint": -0.363,
@@ -187,24 +197,17 @@ KNEES_BENT_KEYFRAME = InitialStateCfg(
         "left_shoulder_pitch_joint": 0.2,
         "right_shoulder_roll_joint": -0.2,
         "right_shoulder_pitch_joint": 0.2,
-    },
-    joint_vel={".*": 0.0},
-)
+}
 
 
-def _build_g1_cfg(mode: int) -> AssetCfg:
+def _build_g1_cfg(mode: int, backend: str):
     if mode not in (5, 11, 13, 15):
         raise ValueError(f"Unsupported mode: {mode}")
 
     hip_pitch_act = G1_ACTUATOR_HIP_PITCH_7520_14 if mode in (5, 13) else G1_ACTUATOR_HIP_PITCH_7520_22
     wrist_act = G1_ACTUATOR_WRIST_4010 if mode in (5, 11) else G1_ACTUATOR_WRIST_5010
 
-    return AssetCfg(
-        mjcf_path=resolve_asset_reference(G1_MJCF_REF_BY_MODE[mode]),
-        usd_path=resolve_asset_reference(G1_URDF_REF_BY_MODE[mode]),
-        init_state=KNEES_BENT_KEYFRAME,
-        self_collisions=True,
-        actuators={
+    actuators = {
             "g1_5020_upper": G1_ACTUATOR_5020_UPPER,
             "g1_hip_pitch": hip_pitch_act,
             "g1_hip_yaw_waist_yaw": G1_ACTUATOR_HIP_YAW_7520_14,
@@ -212,72 +215,136 @@ def _build_g1_cfg(mode: int) -> AssetCfg:
             "g1_wrist_pitch_yaw": wrist_act,
             "g1_waist": G1_ACTUATOR_WAIST,
             "g1_ankle": G1_ACTUATOR_ANKLE,
-        },
-        sensors_isaaclab=[
+    }
+    body_names = _with_toe_body_names(list(BODY_NAMES_SIMULATION))
+
+    if backend == "mjlab":
+        import mujoco
+        from active_adaptation.assets.asset_cfg import AssetSpec, EntityCfg
+        from mjlab.actuator import BuiltinPositionActuatorCfg
+        from mjlab.entity import EntityArticulationInfoCfg
+        from mjlab.sensor import ContactMatch, ContactSensorCfg
+        from mjlab.utils.spec_config import CollisionCfg
+
+        mjcf_path = resolve_asset_reference(G1_MJCF_REF_BY_MODE[mode])
+        cfg = EntityCfg(
+            init_state=EntityCfg.InitialStateCfg(
+                pos=INIT_POS, joint_pos=INIT_JOINT_POS, joint_vel={".*": 0.0}
+            ),
+            spec_fn=lambda: mujoco.MjSpec.from_file(str(mjcf_path)),
+            articulation=EntityArticulationInfoCfg(
+                actuators=tuple(
+                    BuiltinPositionActuatorCfg(
+                        target_names_expr=(spec.joint_names_expr,),
+                        effort_limit=spec.effort_limit,
+                        stiffness=spec.stiffness,
+                        damping=spec.damping,
+                        armature=spec.armature,
+                        frictionloss=spec.friction,
+                    )
+                    for spec in actuators.values()
+                )
+            ),
+            collisions=(
+                CollisionCfg(
+                    geom_names_expr=(".*_collision",),
+                    contype=1,
+                    conaffinity=1,
+                    disable_other_geoms=False,
+                ),
+            ),
+            joint_names_simulation=JOINT_NAMES_SIMULATION,
+            body_names_simulation=body_names,
+            joint_symmetry_mapping=JOINT_SYMMETRY_MAPPING,
+            spatial_symmetry_mapping=SPATIAL_SYMMETRY_MAPPING,
+        )
+        sensors = (
             ContactSensorCfg(
                 name="contact_forces",
-                primary=".*",
-                secondary=[],
-                track_air_time=True,
-                history_length=4,
-            ),
-            ContactSensorCfg(
-                name="self_collision",
-                primary="^(?!.*_ankle_roll_link.*$)(?!.*_toe_link$)(?!.*_wrist_yaw_link$).+$",
-                secondary=[],
-                track_air_time=True,
-                history_length=4,
-            ),
-        ],
-        sensors_mjlab=[
-            ContactSensorCfg(
-                name="contact_forces",
-                # primary=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
-                primary_contact_match_mode="subtree",
-                primary_contact_match_pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
-                primary_contact_match_entity="robot",
-                # secondary="terrain",
-                secondary_contact_match_mode="body",
-                secondary_contact_match_pattern="terrain",
-                track_air_time=True,
-                history_length=4,
+                primary=ContactMatch(
+                    mode="subtree",
+                    pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
+                    entity="robot",
+                ),
+                secondary=ContactMatch(mode="body", pattern="terrain", entity=None),
+                fields=("found", "force"),
                 reduce="netforce",
+                num_slots=1,
+                track_air_time=True,
+                history_length=4,
             ),
             ContactSensorCfg(
                 name="self_collision",
-                primary_contact_match_mode="subtree",
-                primary_contact_match_pattern="pelvis",
-                primary_contact_match_entity="robot",
-                secondary_contact_match_mode="subtree",
-                secondary_contact_match_pattern="pelvis",
-                secondary_contact_match_entity="robot",
+                primary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
+                secondary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
                 fields=("found", "force"),
                 reduce="none",
                 num_slots=1,
                 history_length=4,
             ),
-        ],
-        mjlab_collisions=[
-            MjlabCollisionCfg(
-                geom_names_expr=(".*_collision",),
-                disable_other_geoms=False,
+        )
+        return AssetSpec(config=cfg, sensors=sensors)
+
+    if backend == "isaaclab":
+        import isaaclab.sim as sim_utils
+        from active_adaptation.assets.asset_cfg import AssetSpec, ArticulationCfg
+        from isaaclab.actuators import ImplicitActuatorCfg
+        from isaaclab.sensors import ContactSensorCfg
+
+        actuator_cfgs = {
+            name: ImplicitActuatorCfg(
+                joint_names_expr=[spec.joint_names_expr],
+                effort_limit_sim=spec.effort_limit,
+                velocity_limit_sim=spec.velocity_limit,
+                stiffness=spec.stiffness,
+                damping=spec.damping,
+                friction=spec.friction,
+                armature=spec.armature,
+            )
+            for name, spec in actuators.items()
+        }
+        cfg = ArticulationCfg(
+            spawn=sim_utils.UrdfFileCfg(
+                asset_path=str(resolve_asset_reference(G1_URDF_REF_BY_MODE[mode])),
+                fix_base=False,
+                replace_cylinders_with_capsules=True,
+                self_collision=True,
+                make_instanceable=False,
+                force_usd_conversion=True,
+                joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
+                    gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(
+                        stiffness=0, damping=0
+                    )
+                ),
+                activate_contact_sensors=True,
             ),
-        ],
-        joint_names_simulation=G1_WAIST_UNLOCKED_CFG.joint_names_simulation,
-        body_names_simulation=_with_toe_body_names(
-            list(G1_WAIST_UNLOCKED_CFG.body_names_simulation)
-        ),
-        joint_symmetry_mapping=G1_WAIST_UNLOCKED_CFG.joint_symmetry_mapping,
-        spatial_symmetry_mapping=G1_WAIST_UNLOCKED_CFG.spatial_symmetry_mapping,
+            init_state=ArticulationCfg.InitialStateCfg(
+                pos=INIT_POS, joint_pos=INIT_JOINT_POS, joint_vel={".*": 0.0}
+            ),
+            actuators=actuator_cfgs,
+            joint_names_simulation=JOINT_NAMES_SIMULATION,
+            body_names_simulation=body_names,
+            joint_symmetry_mapping=JOINT_SYMMETRY_MAPPING,
+            spatial_symmetry_mapping=SPATIAL_SYMMETRY_MAPPING,
+        )
+        sensors = {
+            "contact_forces": ContactSensorCfg(
+                prim_path="{ENV_REGEX_NS}/Robot/.*", track_air_time=True, history_length=4
+            ),
+            "self_collision": ContactSensorCfg(
+                prim_path="{ENV_REGEX_NS}/Robot/^(?!.*_ankle_roll_link.*$)(?!.*_toe_link$)(?!.*_wrist_yaw_link$).+$",
+                track_air_time=True,
+                history_length=4,
+            ),
+        }
+        return AssetSpec(config=cfg, sensors=sensors)
+
+    raise ValueError(f"Unsupported backend: {backend}")
+
+
+for _mode in (5, 11, 13, 15):
+    registry.register(
+        "asset",
+        f"g1-mode_{_mode}",
+        lambda backend, mode=_mode: _build_g1_cfg(mode, backend),
     )
-
-
-G1_MODE_5_CFG = _build_g1_cfg(5)
-G1_MODE_11_CFG = _build_g1_cfg(11)
-G1_MODE_13_CFG = _build_g1_cfg(13)
-G1_MODE_15_CFG = _build_g1_cfg(15)
-
-registry.register("asset", "g1-mode_5", G1_MODE_5_CFG)
-registry.register("asset", "g1-mode_11", G1_MODE_11_CFG)
-registry.register("asset", "g1-mode_13", G1_MODE_13_CFG)
-registry.register("asset", "g1-mode_15", G1_MODE_15_CFG)

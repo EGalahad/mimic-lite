@@ -1,9 +1,9 @@
 """Common reward aliases for mimic-lite tasks."""
 
-from active_adaptation.envs.mdp.rewards.base import Reward as BaseReward
 from active_adaptation.envs.utils import find_joints
 from typing import List, TYPE_CHECKING
 import torch
+from mimic_lite.tasks.deferred import DeferredReward as BaseReward
 
 if TYPE_CHECKING:
     from mjlab.sensor import ContactSensor as MJLabContactSensor
@@ -11,15 +11,13 @@ if TYPE_CHECKING:
 
 
 class joint_pos_limits(BaseReward, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         weight: float,
         joint_names: List[str] | str = ".*",
         soft_factor: float = 0.9,
         **kwargs,
     ):
-        super().__init__(env, weight=weight, **kwargs)
         self.asset = self.env.scene.articulations["robot"]
         joint_ids, self.joint_names = find_joints(self.asset, joint_names)
         self.joint_ids = torch.as_tensor(joint_ids, device=self.device)
@@ -71,15 +69,13 @@ class joint_pos_limits(BaseReward, namespace="mimic_lite"):
 
 
 class self_collisions(BaseReward, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         weight: float,
         sensor_name: str = "self_collision",
         force_threshold: float = 10.0,
         **kwargs,
     ):
-        super().__init__(env, weight=weight, **kwargs)
         self.sensor_name = sensor_name
         self.force_threshold = force_threshold
         self.contact_sensor: "MJLabContactSensor" | "IsaacContactSensor" = self.env.scene.sensors[sensor_name]

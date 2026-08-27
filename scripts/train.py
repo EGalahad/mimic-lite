@@ -55,7 +55,14 @@ def main(cfg: DictConfig):
         total_iters = total_frames // frames_per_batch
     cfg.task.total_iters = total_iters
 
-    env, policy = make_env_policy(cfg)
+    env, policy = make_env_policy(
+        cfg.task,
+        cfg.algo,
+        seed=cfg.seed,
+        headless=cfg.headless,
+        device=cfg.device,
+        checkpoint_path=cfg.get("checkpoint_path", None),
+    )
     policy: PPOBase
     requires_rollout_value = bool(getattr(policy, "requires_rollout_value", True))
 
@@ -171,7 +178,7 @@ def main(cfg: DictConfig):
             logging.info(f"Disabled-W&B metrics will be written to {metrics_path}")
 
     for stage in stages:
-        policy.on_stage_start(stage)
+        policy.on_stage_start(stage, env)
         rollout_policy = policy.get_rollout_policy("train")
 
         with (

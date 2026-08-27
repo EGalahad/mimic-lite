@@ -2,10 +2,10 @@
 
 import active_adaptation as aa
 from mimic_lite.tasks.command import RobotTracking
-from active_adaptation.envs.mdp.rewards.base import Reward as BaseReward
 from active_adaptation.envs.utils import find_bodies, find_sensor_bodies
 from typing import TYPE_CHECKING, cast
 import torch
+from mimic_lite.tasks.deferred import DeferredReward as BaseReward
 
 if aa.get_backend() == "isaaclab":
     from isaaclab.sensors import ContactSensor as IsaacContactSensor
@@ -57,15 +57,13 @@ def _current_in_contact(contact_sensor, body_ids: torch.Tensor) -> torch.Tensor:
 
 
 class feet_slip(TrackReward, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         body_names: str,
         weight: float,
         tolerance: float = 0.0,
         **kwargs,
     ):
-        super().__init__(env, weight=weight, **kwargs)
         self.asset = self.env.scene.articulations["robot"]
         self.contact_sensor = self.env.scene.sensors["contact_forces"]
         articulation_body_ids, self.body_names = find_bodies(self.asset, body_names)
@@ -97,9 +95,8 @@ class feet_slip(TrackReward, namespace="mimic_lite"):
 class feet_air_time(TrackReward, namespace="mimic_lite"):
     supported_backends = ("isaaclab", "mjlab")
 
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         body_names: str | list[str],
         thres: float,
         weight: float,
@@ -110,7 +107,6 @@ class feet_air_time(TrackReward, namespace="mimic_lite"):
         debug_air_color: tuple[float, float, float, float] = (0.1, 0.4, 1.0, 1.0),
         **kwargs,
     ):
-        super().__init__(env, weight=weight, **kwargs)
         self.asset = self.env.scene.articulations["robot"]
         self.contact_sensor: "IsaacContactSensor" | "MJLabContactSensor" = self.env.scene.sensors["contact_forces"]
         body_indices, matched_body_names = find_bodies(self.asset, body_names)
@@ -278,8 +274,7 @@ class feet_air_time(TrackReward, namespace="mimic_lite"):
 class feet_contact_count(TrackReward, namespace="mimic_lite"):
     supported_backends = ("isaaclab", "mjlab")
 
-    def __init__(self, env, body_names: str, weight: float, enabled: bool = True):
-        super().__init__(env, weight=weight, enabled=enabled)
+    def _initialize_impl(self, body_names: str, weight: float, enabled: bool = True):
         self.asset = self.env.scene.articulations["robot"]
         self.contact_sensor: "IsaacContactSensor" | "MJLabContactSensor" = self.env.scene.sensors["contact_forces"]
 
@@ -314,8 +309,7 @@ class feet_contact_count(TrackReward, namespace="mimic_lite"):
 class feet_contact_duration(TrackReward, namespace="mimic_lite"):
     supported_backends = ("isaaclab", "mjlab")
 
-    def __init__(self, env, body_names: str, weight: float, enabled: bool = True):
-        super().__init__(env, weight=weight, enabled=enabled)
+    def _initialize_impl(self, body_names: str, weight: float, enabled: bool = True):
         self.asset = self.env.scene.articulations["robot"]
         self.contact_sensor: "IsaacContactSensor" | "MJLabContactSensor" = self.env.scene.sensors["contact_forces"]
 
@@ -339,4 +333,3 @@ class feet_contact_duration(TrackReward, namespace="mimic_lite"):
 
     def _compute(self):
         return self.current_contact.float().mean(1, keepdim=True)
-

@@ -1,7 +1,8 @@
 from mimic_lite.tasks.command import RobotTracking
 
-from active_adaptation.envs.mdp.rewards.base import Reward as BaseReward
-from active_adaptation.envs.utils import find_bodies, find_joints, find_sensor_bodies
+from active_adaptation.envs.utils import find_sensor_bodies
+from active_adaptation.utils.string import resolve_matching_names
+from mimic_lite.tasks.deferred import DeferredReward as BaseReward
 
 from typing import List, Sequence, TYPE_CHECKING
 
@@ -66,11 +67,7 @@ def _select_tracking_body_names(
     body_names: List[str] | str,
 ) -> tuple[list[int], list[str]]:
     available_body_names = list(command_manager.tracking_body_names)
-    _, matched_body_names = find_bodies(command_manager.asset, body_names)
-    matched_name_set = set(matched_body_names)
-    selected_body_names = [
-        body_name for body_name in available_body_names if body_name in matched_name_set
-    ]
+    _, selected_body_names = resolve_matching_names(body_names, available_body_names)
     assert selected_body_names, "No body names matched in tracking_body_names"
     selected_body_indices = [
         available_body_names.index(body_name) for body_name in selected_body_names
@@ -83,11 +80,7 @@ def _select_tracking_joint_names(
     joint_names: List[str] | str,
 ) -> tuple[list[int], list[str]]:
     available_joint_names = list(command_manager.tracking_joint_names)
-    _, matched_joint_names = find_joints(command_manager.asset, joint_names)
-    matched_name_set = set(matched_joint_names)
-    selected_joint_names = [
-        joint_name for joint_name in available_joint_names if joint_name in matched_name_set
-    ]
+    _, selected_joint_names = resolve_matching_names(joint_names, available_joint_names)
     assert selected_joint_names, "No joint names matched in tracking_joint_names"
     selected_joint_indices = [
         available_joint_names.index(joint_name) for joint_name in selected_joint_names
@@ -96,14 +89,12 @@ def _select_tracking_joint_names(
 
 
 class _tracking_body(TrackReward, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         body_names: List[str] | str | None = None,
         sigma: float = 0.03,
         **kwargs,
     ):
-        super().__init__(env, **kwargs)
         if body_names is None:
             body_names = self.command_manager.tracking_body_names
 
@@ -127,13 +118,12 @@ class body_pos_exp(_tracking_body, namespace="mimic_lite"):
 
 
 class windowed_root_displacement_exp(_tracking_body, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         history_steps: Sequence[int] = (200,),
         **kwargs,
     ):
-        super().__init__(env, **kwargs)
+        super()._initialize_impl(**kwargs)
         if self.num_bodies != 1:
             raise ValueError(
                 "windowed_root_displacement_exp requires exactly one body, "
@@ -217,14 +207,12 @@ class body_ang_vel_exp(_tracking_body, namespace="mimic_lite"):
 
 
 class _tracking_joint(TrackReward, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         joint_names: List[str] | str | None = None,
         sigma: float = 0.03,
         **kwargs,
     ):
-        super().__init__(env, **kwargs)
         if joint_names is None:
             joint_names = self.command_manager.tracking_joint_names
 

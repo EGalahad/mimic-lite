@@ -3,10 +3,10 @@
 import torch
 from typing import cast
 import active_adaptation as aa
-from active_adaptation.envs.mdp.observations.base import Observation as BaseObservation
 from active_adaptation.envs.utils import find_bodies, find_joints
 from active_adaptation.utils.math import quat_rotate_inverse
 from mimic_lite.tasks.actions import JointPosition
+from mimic_lite.tasks.deferred import DeferredObservation as BaseObservation
 
 if aa.get_backend() == "isaaclab":
     from isaaclab.assets import ArticulationData
@@ -29,8 +29,7 @@ def _get_simulation_body_selection(asset, body_names: str, device: torch.device)
 
 
 class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env, noise_std: float = 0.0, history_steps: list[int] = [1]):
-        super().__init__(env)
+    def _initialize_impl(self, noise_std: float = 0.0, history_steps: list[int] = [1]):
         self.asset = self.env.scene.articulations["robot"]
         self.noise_std = noise_std
         self.history_steps = history_steps
@@ -60,8 +59,7 @@ class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
 
 
 class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env, noise_std: float = 0.0, history_steps: list[int] = [1]):
-        super().__init__(env)
+    def _initialize_impl(self, noise_std: float = 0.0, history_steps: list[int] = [1]):
         self.asset = self.env.scene.articulations["robot"]
         self.noise_std = noise_std
         self.history_steps = history_steps
@@ -93,14 +91,12 @@ class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
 
 
 class joint_pos_history(BaseObservation, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         joint_names: str = ".*",
         history_steps: list[int] = [0],
         noise_std: float = 0.0,
     ):
-        super().__init__(env)
         self.history_steps = history_steps
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
@@ -145,14 +141,12 @@ class joint_pos_history(BaseObservation, namespace="mimic_lite"):
         return joint_pos_selected.reshape(self.num_envs, -1)
 
 class joint_vel_history(BaseObservation, namespace="mimic_lite"):
-    def __init__(
+    def _initialize_impl(
         self,
-        env,
         joint_names: str = ".*",
         history_steps: list[int] = [0],
         noise_std: float = 0.0,
     ):
-        super().__init__(env)
         self.history_steps = history_steps
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
@@ -190,8 +184,7 @@ class joint_vel_history(BaseObservation, namespace="mimic_lite"):
         return joint_vel_selected.reshape(self.num_envs, -1)
 
 class applied_action(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env):
-        super().__init__(env)
+    def _initialize_impl(self):
         self.action_manager = cast(JointPosition, self.env.input_managers["action"])
 
     def compute(self):
@@ -199,8 +192,7 @@ class applied_action(BaseObservation, namespace="mimic_lite"):
 
 
 class prev_actions(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env, key: str = "action", steps: int = 1):
-        super().__init__(env)
+    def _initialize_impl(self, key: str = "action", steps: int = 1):
         self.steps = steps
         self.action_manager = cast(JointPosition, self.env.input_managers["action"])
 
@@ -210,8 +202,7 @@ class prev_actions(BaseObservation, namespace="mimic_lite"):
 
 
 class body_pos_b(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env, body_names: str):
-        super().__init__(env)
+    def _initialize_impl(self, body_names: str):
         self.asset = self.env.scene.articulations["robot"]
         self.body_indices, self.body_names = _get_simulation_body_selection(
             self.asset,
@@ -235,8 +226,7 @@ class body_pos_b(BaseObservation, namespace="mimic_lite"):
 
 
 class body_vel_b(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env, body_names: str):
-        super().__init__(env)
+    def _initialize_impl(self, body_names: str):
         self.asset = self.env.scene.articulations["robot"]
         self.body_indices, self.body_names = _get_simulation_body_selection(
             self.asset,
@@ -257,8 +247,7 @@ class body_vel_b(BaseObservation, namespace="mimic_lite"):
 
 
 class applied_torque(BaseObservation, namespace="mimic_lite"):
-    def __init__(self, env, joint_names: str = ".*"):
-        super().__init__(env)
+    def _initialize_impl(self, joint_names: str = ".*"):
         self.asset = self.env.scene.articulations["robot"]
         self.joint_ids, self.joint_names = _get_simulation_joint_selection(
             self.asset,

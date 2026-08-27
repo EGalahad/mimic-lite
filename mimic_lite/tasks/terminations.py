@@ -1,5 +1,5 @@
 from mimic_lite.tasks.command import RobotTracking
-from active_adaptation.envs.mdp.terminations.base import Termination as BaseTermination
+from mimic_lite.tasks.deferred import DeferredTermination as BaseTermination
 
 import torch
 from typing import List
@@ -10,8 +10,9 @@ except ModuleNotFoundError:
 
 
 class _cum_error_mixin:
-    def __init__(self, env, min_steps: int = 1, threshold: float = 0.25, **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_cum_error(
+        self, min_steps: int = 1, threshold: float = 0.25
+    ) -> None:
         self.min_steps = min_steps
         self.threshold = threshold
 
@@ -40,17 +41,20 @@ class motion_timeout(RobotTrackTermination):
     Terminates when the motion clip is consumed (or always true in replay mode).
     """
 
-    def __init__(self, env, is_timeout: bool = True, **kwargs):
-        super().__init__(env, is_timeout=is_timeout, **kwargs)
-
     def compute(self, termination: torch.Tensor):
         timeout = (self.command_manager.t >= self.command_manager.motion_len)
         return timeout.to(self.device).unsqueeze(1)
 
 
 class cum_body_pos_error(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -66,8 +70,14 @@ class cum_body_pos_error(_cum_error_mixin, RobotTrackTermination):
 
 
 class cum_body_z_error(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -86,8 +96,14 @@ class cum_body_z_error(_cum_error_mixin, RobotTrackTermination):
 
 
 class cum_body_ori_error(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -103,8 +119,14 @@ class cum_body_ori_error(_cum_error_mixin, RobotTrackTermination):
 
 
 class cum_body_lin_vel_error(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -122,8 +144,14 @@ class cum_body_lin_vel_error(_cum_error_mixin, RobotTrackTermination):
 
 
 class cum_body_ang_vel_error(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -141,8 +169,14 @@ class cum_body_ang_vel_error(_cum_error_mixin, RobotTrackTermination):
 
 
 class cum_body_pos_error_local(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -157,8 +191,14 @@ class cum_body_pos_error_local(_cum_error_mixin, RobotTrackTermination):
         super().update()
 
 class cum_body_ori_error_local(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, body_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        body_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
@@ -177,8 +217,14 @@ class cum_body_ori_error_local(_cum_error_mixin, RobotTrackTermination):
 
 
 class cum_joint_pos_error(_cum_error_mixin, RobotTrackTermination):
-    def __init__(self, env, joint_names: str | List[str] = ".*", **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self,
+        joint_names: str | List[str] = ".*",
+        min_steps: int = 1,
+        threshold: float = 0.25,
+        **kwargs,
+    ):
+        self._initialize_cum_error(min_steps=min_steps, threshold=threshold)
         self.joint_names = resolve_matching_names(
             joint_names, self.command_manager.tracking_joint_names
         )[1]
