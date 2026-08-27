@@ -250,6 +250,8 @@ def _build_g1_cfg(mode: int, backend: str):
                     geom_names_expr=(".*_collision",),
                     contype=1,
                     conaffinity=1,
+                    condim=3,
+                    priority=0,
                     disable_other_geoms=False,
                 ),
             ),

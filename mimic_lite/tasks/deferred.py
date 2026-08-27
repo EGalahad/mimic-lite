@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from typing import Generic, TypeVar
+
+from active_adaptation.envs.mdp.commands.base import Command
 from active_adaptation.envs.mdp.observations.base import Observation
 from active_adaptation.envs.mdp.rewards.base import Reward
 from active_adaptation.envs.mdp.terminations.base import Termination
 
 
-class DeferredObservation(Observation):
+CT = TypeVar("CT", bound=Command)
+
+
+class DeferredObservation(Observation[CT], Generic[CT]):
     def __init__(self, *args, functional: bool = False, **kwargs) -> None:
         super().__init__(functional=functional)
         self._deferred_args = args
@@ -22,7 +28,7 @@ class DeferredObservation(Observation):
         return None
 
 
-class DeferredReward(Reward):
+class DeferredReward(Reward[CT], Generic[CT]):
     def __init__(
         self,
         *args,
@@ -46,7 +52,7 @@ class DeferredReward(Reward):
         return None
 
 
-class DeferredTermination(Termination):
+class DeferredTermination(Termination[CT], Generic[CT]):
     def __init__(
         self,
         *args,
