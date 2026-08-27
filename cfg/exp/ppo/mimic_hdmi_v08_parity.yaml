@@ -1,0 +1,79 @@
+# @package _global_
+
+defaults:
+  - /algo/ppo/module: large
+  - override /algo: mimic_lite_ppo
+
+exp_name: mimic-hdmi-v08-parity-8x8192-seed0
+total_iters: 4000
+checkpoint_interval: 1000
+upload_interval: 1000
+
+task:
+  num_envs: 8192
+  command:
+    motion_cfgs:
+      lafan:
+        path: hf://elijahgalahad/any4hdmi-g1-lafan
+        weight: 0.2
+        full_motion: true
+      style100:
+        path: hf://elijahgalahad/any4hdmi-g1-100style
+        weight: 0.1
+        full_motion: true
+      sonic:
+        path: ../any4hdmi/output/g1/sonic
+        filenames_path: limmt/passed/filenames.txt
+        weight: 0.25
+        full_motion: false
+        shard: false
+      ground_motion:
+        path: hf://elijahgalahad/any4hdmi-g1-ground-motions
+        weight: 0.05
+        full_motion: true
+      amass_hard:
+        path: ../any4hdmi/output/g1/amass_hard
+        filenames_path: views/train_dynamic.txt
+        weight: 0.05
+        full_motion: true
+      extreme:
+        path: ../any4hdmi/output/g1/extreme_motions
+        weight: 0.05
+        full_motion: true
+      extreme_demo:
+        path: ../any4hdmi/output/g1/extreme-demo
+        weight: 0.1
+        full_motion: true
+      high_dynamic_sequences:
+        path: ../any4hdmi/output/g1/high_dynamic_sequences
+        weight: 0.1
+        full_motion: true
+      sonic_strict_one_leg:
+        path: ../any4hdmi/output/g1/sonic
+        filenames_path: views/strict_one_leg.txt
+        weight: 0.05
+        full_motion: true
+      real_pico:
+        path: hf://elijahgalahad/any4hdmi-g1-real-pico
+        weight: 0.05
+        full_motion: true
+  reward:
+    tracking:
+      root_pos:
+        _target_: mimic_lite.body_pos_exp
+    loco:
+      survival:
+        weight: 5.0
+
+algo:
+  ppo_epochs: 3
+  entropy_coef_start: 0.012
+  entropy_coef_end: 0.001
+  entropy_decay_start: 0.8125
+  entropy_decay_end: 0.875
+  desired_kl_end: null
+  tail_kl_lr_control: false
+  critic_hidden_dims: [1024, 512, 256]
+  max_grad_norm: 1.0
+  grad_sync_mode: manual
+  train_amp_dtype: null
