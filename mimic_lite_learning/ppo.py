@@ -176,6 +176,7 @@ class PPOConfig:
 
 
     vecnorm: bool = True
+    freeze_vecnorm: bool = False  # legacy no-op; deploy VecNorm is always frozen
 
     grad_sync_mode: str | None = "ddp"
     ddp_bucket_cap_mb: float = 4.0
@@ -1320,6 +1321,7 @@ class PPOPolicy(PPOBase):
     def load_state_dict(self, state_dict, strict=True):
         succeed_keys = []
         failed_keys = []
+        failures = []
         for name, module in self.named_children():
             _state_dict = state_dict.get(name, {})
             try:
@@ -1331,7 +1333,12 @@ class PPOPolicy(PPOBase):
             except Exception as exc:
                 warnings.warn(f"Failed to load state dict for {name}: {str(exc)}")
                 failed_keys.append(name)
+                failures.append((name, exc))
         print(f"Successfully loaded {succeed_keys}.")
+
+        if strict and failures:
+            details = "; ".join(f"{name}: {exc}" for name, exc in failures)
+            raise RuntimeError(f"Strict policy state load failed: {details}")
 
         start_iter = state_dict.get("last_iter", 0)
         if hasattr(self.env, "set_progress"):

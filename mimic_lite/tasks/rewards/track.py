@@ -136,7 +136,7 @@ class windowed_root_displacement_exp(_tracking_body, namespace="mimic_lite"):
         )
         self.error = torch.zeros(self.num_envs, device=self.device)
 
-    def reset(self, env_ids: torch.Tensor) -> None:
+    def reset(self, env_ids: torch.Tensor, reset_td=None) -> None:
         self.history.reset(env_ids)
         self.error[env_ids] = 0.0
 
@@ -246,8 +246,9 @@ class joint_vel_tracking_product(_tracking_joint, namespace="mimic_lite"):
 
 
 class feet_air_time_ref(TrackReward, namespace="mimic_lite"):
-    def __init__(self, env, body_names: List[str] | str, thres: float, **kwargs):
-        super().__init__(env, **kwargs)
+    def _initialize_impl(
+        self, body_names: List[str] | str, thres: float, **kwargs
+    ):
         self.thres = thres
         self.asset = self.command_manager.asset
         self.contact_sensor: "ContactSensor" = self.env.scene["feet_ground_contact"]
@@ -281,7 +282,7 @@ class feet_air_time_ref(TrackReward, namespace="mimic_lite"):
             torch.tensor(self.c_high / self.c_low, device=self.device)
         )
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, reset_td=None):
         self.reward_time[env_ids] = 0.0
         self.last_contact[env_ids] = False
 

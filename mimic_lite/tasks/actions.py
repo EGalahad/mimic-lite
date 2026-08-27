@@ -63,7 +63,7 @@ class JointPosition(Action, namespace="mimic_lite"):
     def action_dim(self) -> int:
         return len(self.joint_ids)
 
-    def reset(self, env_ids: torch.Tensor):
+    def reset(self, env_ids: torch.Tensor, reset_td=None):
         self.action_buf[env_ids] = 0
         self.applied_action[env_ids] = 0
 

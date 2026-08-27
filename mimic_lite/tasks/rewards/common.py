@@ -13,7 +13,6 @@ if TYPE_CHECKING:
 class joint_pos_limits(BaseReward, namespace="mimic_lite"):
     def _initialize_impl(
         self,
-        weight: float,
         joint_names: List[str] | str = ".*",
         soft_factor: float = 0.9,
         **kwargs,
@@ -71,7 +70,6 @@ class joint_pos_limits(BaseReward, namespace="mimic_lite"):
 class self_collisions(BaseReward, namespace="mimic_lite"):
     def _initialize_impl(
         self,
-        weight: float,
         sensor_name: str = "self_collision",
         force_threshold: float = 10.0,
         **kwargs,

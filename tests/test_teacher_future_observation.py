@@ -16,6 +16,7 @@ class TeacherFutureObservationTest(unittest.TestCase):
             ref_root_pos_future_b=torch.arange(18).reshape(1, 3, 6)
         )
         observation.env = SimpleNamespace(num_envs=1)
+        observation._initialized = True
         observation.future_step_indices = torch.tensor([0, 2])
 
         torch.testing.assert_close(

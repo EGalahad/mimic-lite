@@ -33,7 +33,7 @@ def test_random_joint_offset_samples_each_environment_independently() -> None:
         "active_adaptation.envs.mdp.randomizations.common.uniform",
         return_value=sampled_offsets,
     ) as sample:
-        randomization.reset(env_ids)
+        randomization.reset(env_ids, None)
 
     low, high = sample.call_args.args
     assert low.shape == (2, 2)

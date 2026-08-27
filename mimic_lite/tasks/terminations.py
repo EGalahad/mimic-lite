@@ -26,7 +26,7 @@ class _cum_error_mixin:
         self.__cum_steps[self.__exceeded] += 1
         self.__cum_steps[~self.__exceeded] = 0
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, reset_td=None):
         self.__cum_steps[env_ids] = 0
 
     def compute(self, termination: torch.Tensor):

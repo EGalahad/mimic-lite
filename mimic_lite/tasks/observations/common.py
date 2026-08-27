@@ -39,7 +39,7 @@ class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
         self.buffer = torch.zeros((self.num_envs, self.buffer_size, 3), device=self.device)
         self.reset(torch.arange(self.num_envs, device=self.device))
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, reset_td=None):
         value = self.asset.data.root_com_ang_vel_b[env_ids]
         value = value.unsqueeze(1).expand(-1, self.buffer_size, -1)
         if self.noise_std > 0:
@@ -69,7 +69,7 @@ class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
         self.buffer = torch.zeros((self.num_envs, self.buffer_size, 3), device=self.device)
         self.reset(torch.arange(self.num_envs, device=self.device))
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, reset_td=None):
         value = self.asset.data.projected_gravity_b[env_ids]
         value = value.unsqueeze(1).expand(-1, self.buffer_size, -1)
         if self.noise_std > 0:
@@ -116,7 +116,7 @@ class joint_pos_history(BaseObservation, namespace="mimic_lite"):
         )
         self.action_manager = cast(JointPosition, self.env.input_managers["action"])
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, reset_td=None):
         value = self.asset.data.joint_pos[
             env_ids.unsqueeze(1), self.joint_ids.unsqueeze(0)
         ]
@@ -164,7 +164,7 @@ class joint_vel_history(BaseObservation, namespace="mimic_lite"):
         )
         self.action_manager = cast(JointPosition, self.env.input_managers["action"])
 
-    def reset(self, env_ids):
+    def reset(self, env_ids, reset_td=None):
         value = self.asset.data.joint_vel[
             env_ids.unsqueeze(1), self.joint_ids.unsqueeze(0)
         ]
