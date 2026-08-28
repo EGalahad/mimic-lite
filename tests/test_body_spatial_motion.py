@@ -69,3 +69,53 @@ def test_body_spatial_motion_is_independently_frame_invariant():
         actual[1][:, current_index],
         torch.eye(3, dtype=dtype)[None, None].expand(1, 2, 3, 3),
     )
+
+
+def test_body_spatial_error_is_independently_frame_invariant():
+    dtype = torch.float64
+    reference_position = torch.tensor(
+        [[[[0.4, -0.2, 0.6]], [[0.6, 0.1, 0.7]]]], dtype=dtype
+    )
+    reference_rotation = torch.eye(3, dtype=dtype)[None, None, None].repeat(
+        1, 2, 1, 1, 1
+    )
+    actual_position = torch.tensor([[[0.1, -0.3, 0.5]]], dtype=dtype)
+    angle = torch.tensor(0.3, dtype=dtype)
+    actual_rotation = torch.tensor(
+        [
+            [
+                [
+                    [angle.cos(), -angle.sin(), 0.0],
+                    [angle.sin(), angle.cos(), 0.0],
+                    [0.0, 0.0, 1.0],
+                ]
+            ]
+        ],
+        dtype=dtype,
+    )
+    offset_position = torch.tensor([[0.2, -0.1, 0.15]], dtype=dtype)
+    offset_rotation = actual_rotation.squeeze(0)
+
+    expected = _spatial_motion_from_local_poses(
+        reference_position,
+        reference_rotation,
+        actual_position,
+        actual_rotation,
+    )
+    reframed_reference = _compose_body_frames(
+        reference_position, reference_rotation, offset_position, offset_rotation
+    )
+    reframed_actual = _compose_body_frames(
+        actual_position[:, None],
+        actual_rotation[:, None],
+        offset_position,
+        offset_rotation,
+    )
+    actual = _spatial_motion_from_local_poses(
+        *reframed_reference,
+        reframed_actual[0][:, 0],
+        reframed_actual[1][:, 0],
+    )
+
+    torch.testing.assert_close(actual[0], expected[0])
+    torch.testing.assert_close(actual[1], expected[1])

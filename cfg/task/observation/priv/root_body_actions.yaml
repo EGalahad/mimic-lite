@@ -6,12 +6,9 @@ ref_root_pos_future_b:
 ref_root_ori_future_b:
   _target_: mimic_lite.ref_root_ori_future_b
 
-# body diff
-diff_body_pos_future_local:
-  _target_: mimic_lite.diff_body_pos_future_local
-  future_steps: [0, 1]
-diff_body_ori_future_local:
-  _target_: mimic_lite.diff_body_ori_future_local
+# body spatial correction
+body_spatial_error_local:
+  _target_: mimic_lite.body_spatial_error_local
   future_steps: [0, 1]
 diff_body_lin_vel_future:
   _target_: mimic_lite.diff_body_lin_vel_future

@@ -286,6 +286,47 @@ class body_spatial_motion_local(
             self.num_envs, -1
         )
 
+
+class body_spatial_error_local(
+    _tracking_body_future_observation, namespace="mimic_lite"
+):
+    """Per-body reference-to-actual spatial correction in robot-local frames."""
+
+    def compute(self):
+        command = self.command_manager
+        body_indices = self.body_indices_tracking
+        current_index = command.obs_current_step_index
+
+        future_position_w = self._select_body_future(command.ref_body_pos_future_w)
+        future_quaternion_w = self._select_body_future(command.ref_body_quat_future_w)
+        future_position, future_quaternion = _body_pose_in_anchor_frame(
+            command.ref_anchor_pos_future_w[:, current_index, None, None],
+            command.ref_anchor_quat_future_w[:, current_index, None, None],
+            future_position_w,
+            future_quaternion_w,
+        )
+        actual_position = torch.index_select(
+            command.robot_body_pos_local, 1, body_indices
+        )
+        actual_quaternion = torch.index_select(
+            command.robot_body_quat_local, 1, body_indices
+        )
+        spatial_position, spatial_rotation = _spatial_motion_from_local_poses(
+            future_position,
+            matrix_from_quat(future_quaternion),
+            actual_position,
+            matrix_from_quat(actual_quaternion),
+        )
+        rotation_6d = spatial_rotation[..., :2, :].reshape(
+            self.num_envs,
+            len(self.future_step_indices),
+            len(self.body_indices_tracking),
+            6,
+        )
+        return torch.cat([spatial_position, rotation_6d], -1).reshape(
+            self.num_envs, -1
+        )
+
 # body_local_diff_obs
 
 class _diff_body_future_observation(_tracking_body_future_observation):
