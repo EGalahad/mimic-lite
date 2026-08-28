@@ -32,6 +32,10 @@ FILE_PATH = Path(__file__).resolve().parent
 CONFIG_PATH = FILE_PATH.parent / "cfg"
 
 
+def _start_iteration(checkpoint_path: str | None, current_iter: int) -> int:
+    return current_iter + 1 if checkpoint_path else 0
+
+
 @hydra.main(config_path=str(CONFIG_PATH), config_name="train", version_base=None)
 def main(cfg: DictConfig):
     OmegaConf.resolve(cfg)
@@ -137,7 +141,10 @@ def main(cfg: DictConfig):
     next_saved_keys.extend(policy.get_next_saved_keys())
     next_saved_keys = list(dict.fromkeys(next_saved_keys))
 
-    env_frames = 0
+    start_iter = _start_iteration(
+        cfg.get("checkpoint_path", None), int(getattr(env, "current_iter", 0))
+    )
+    env_frames = start_iter * frames_per_batch
 
     if hasattr(policy.cfg, "stages"):
         stages = policy.cfg.stages
@@ -196,11 +203,10 @@ def main(cfg: DictConfig):
             tmp_td.unsqueeze(-1).expand(env.num_envs, cfg.algo.train_every).clone()
         )
 
-        progress = range(total_iters)
+        progress = range(start_iter, total_iters)
         if aa.is_main_process():
             progress = tqdm(progress, desc=stage)
 
-        start_iter = getattr(env, "current_iter", 0)
         for i in progress:
             if should_save(i):
                 should_upload = i % upload_interval == 0
@@ -218,7 +224,7 @@ def main(cfg: DictConfig):
                     set_exploration_type(ExplorationType.RANDOM),
                 ):
                     if hasattr(env, "set_progress"):
-                        env.set_progress(start_iter + i)
+                        env.set_progress(i)
                     for step in range(cfg.algo.train_every):
                         with ScopedTimer("policy_inference"):
                             carry = rollout_policy(carry)
@@ -280,9 +286,9 @@ def main(cfg: DictConfig):
                 #         {k: v for k, v in info.items() if isinstance(v, (float, int))}
                 #     )
                 # )
-                run.log(info)
+                run.log(info, step=i)
                 if metrics_path is not None:
-                    metrics_record = {"iteration": start_iter + i}
+                    metrics_record = {"iteration": i}
                     for key, value in info.items():
                         if isinstance(value, torch.Tensor):
                             if value.numel() != 1:
