@@ -10,10 +10,21 @@ from tensordict import TensorDict
 
 from active_adaptation.learning.ppo.common import REWARD_KEY
 from mimic_lite_learning.common import check_vecnorm_divergence
-from mimic_lite_learning.ppo import PPOConfig, PPOPolicy
+from mimic_lite_learning.ppo import PPOConfig, PPOPolicy, _ppo_probability_ratio
 
 
 class PPOKLControlTest(unittest.TestCase):
+    def test_probability_ratio_bounds_finite_exponents_without_hiding_nonfinite(self) -> None:
+        log_ratio = torch.tensor([-100.0, 100.0], requires_grad=True)
+        ratio = _ppo_probability_ratio(log_ratio)
+        ratio.sum().backward()
+
+        self.assertTrue(torch.isfinite(ratio).all())
+        self.assertTrue(torch.isfinite(log_ratio.grad).all())
+        self.assertTrue(
+            torch.isinf(_ppo_probability_ratio(torch.tensor([float("inf")]))).all()
+        )
+
     @staticmethod
     def _policy(current_iter: int) -> PPOPolicy:
         policy = object.__new__(PPOPolicy)

@@ -64,6 +64,18 @@ PROFILE_SYNC_TIMERS = os.environ.get("AA_PROFILE_SYNC_TIMERS", "0").lower() in {
     "on",
 }
 
+_PPO_LOG_RATIO_LIMIT = 20.0
+
+
+def _ppo_probability_ratio(log_ratio: torch.Tensor) -> torch.Tensor:
+    """Exponentiate finite log ratios without overflowing the PPO surrogate."""
+    bounded = torch.where(
+        torch.isfinite(log_ratio),
+        log_ratio.clamp(-_PPO_LOG_RATIO_LIMIT, _PPO_LOG_RATIO_LIMIT),
+        log_ratio,
+    )
+    return torch.exp(bounded)
+
 
 class ResidualActorFeatureGate(nn.Module):
     def __init__(self, alpha_init: float) -> None:
@@ -1057,7 +1069,7 @@ class PPOPolicy(PPOBase):
         with ScopedTimer("training.policy.ppo.policy_loss", sync=PROFILE_SYNC_TIMERS):
             adv = tensordict["adv"]
             log_ratio = (log_probs - logp_old).unsqueeze(-1)
-            ratio = torch.exp(log_ratio)
+            ratio = _ppo_probability_ratio(log_ratio)
             surr1 = adv * ratio
             surr2 = adv * ratio.clamp(1.0 - self.clip_param, 1.0 + self.clip_param)
             policy_loss = -(torch.min(surr1, surr2)[valid]).mean()
@@ -1193,7 +1205,7 @@ class PPOPolicy(PPOBase):
                 ):
                     adv = micro_td["adv"]
                     log_ratio = (log_probs - logp_old).unsqueeze(-1)
-                    ratio = torch.exp(log_ratio)
+                    ratio = _ppo_probability_ratio(log_ratio)
                     surr1 = adv * ratio
                     surr2 = adv * ratio.clamp(1.0 - self.clip_param, 1.0 + self.clip_param)
                     policy_loss_part = -torch.min(surr1, surr2)[valid].sum() / valid_count
