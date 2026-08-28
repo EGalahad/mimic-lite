@@ -1083,18 +1083,26 @@ class PPOPolicy(PPOBase):
         with ScopedTimer("training.policy.ppo.clip_grad", sync=PROFILE_SYNC_TIMERS):
             if self.cfg.separate_actor_encoder_grad_clip:
                 actor_grad_norm = nn.utils.clip_grad_norm_(
-                    self._actor_body_parameters, self.cfg.max_grad_norm
+                    self._actor_body_parameters,
+                    self.cfg.max_grad_norm,
+                    error_if_nonfinite=True,
                 )
                 encoder_grad_norm = nn.utils.clip_grad_norm_(
-                    self._actor_encoder_parameters, self.cfg.max_grad_norm
+                    self._actor_encoder_parameters,
+                    self.cfg.max_grad_norm,
+                    error_if_nonfinite=True,
                 )
             else:
                 actor_grad_norm = nn.utils.clip_grad_norm_(
-                    self.actor.parameters(), self.cfg.max_grad_norm
+                    self.actor.parameters(),
+                    self.cfg.max_grad_norm,
+                    error_if_nonfinite=True,
                 )
                 encoder_grad_norm = torch.zeros_like(actor_grad_norm)
             critic_grad_norm = nn.utils.clip_grad_norm_(
-                self.critic.parameters(), self.cfg.max_grad_norm
+                self.critic.parameters(),
+                self.cfg.max_grad_norm,
+                error_if_nonfinite=True,
             )
         with ScopedTimer(
             "training.policy.ppo.optimizer_step", sync=PROFILE_SYNC_TIMERS
@@ -1264,18 +1272,26 @@ class PPOPolicy(PPOBase):
         with ScopedTimer("training.policy.ppo.clip_grad", sync=PROFILE_SYNC_TIMERS):
             if self.cfg.separate_actor_encoder_grad_clip:
                 actor_grad_norm = nn.utils.clip_grad_norm_(
-                    self._actor_body_parameters, self.cfg.max_grad_norm
+                    self._actor_body_parameters,
+                    self.cfg.max_grad_norm,
+                    error_if_nonfinite=True,
                 )
                 encoder_grad_norm = nn.utils.clip_grad_norm_(
-                    self._actor_encoder_parameters, self.cfg.max_grad_norm
+                    self._actor_encoder_parameters,
+                    self.cfg.max_grad_norm,
+                    error_if_nonfinite=True,
                 )
             else:
                 actor_grad_norm = nn.utils.clip_grad_norm_(
-                    self.actor.parameters(), self.cfg.max_grad_norm
+                    self.actor.parameters(),
+                    self.cfg.max_grad_norm,
+                    error_if_nonfinite=True,
                 )
                 encoder_grad_norm = torch.zeros_like(actor_grad_norm)
             critic_grad_norm = nn.utils.clip_grad_norm_(
-                self.critic.parameters(), self.cfg.max_grad_norm
+                self.critic.parameters(),
+                self.cfg.max_grad_norm,
+                error_if_nonfinite=True,
             )
         with ScopedTimer(
             "training.policy.ppo.optimizer_step", sync=PROFILE_SYNC_TIMERS
