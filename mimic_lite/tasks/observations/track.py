@@ -2,7 +2,12 @@ from mimic_lite.tasks.command import RobotTracking
 from mimic_lite.tasks.actions import JointPosition
 
 from active_adaptation.utils.string import resolve_matching_names
+from active_adaptation.utils.math import matrix_from_quat
 from mimic_lite.tasks.deferred import DeferredObservation as BaseObservation
+from mimic_lite.tasks.transforms import (
+    _body_pose_in_anchor_frame,
+    _spatial_motion_from_local_poses,
+)
 
 import torch
 from typing import cast, List
@@ -228,6 +233,58 @@ class ref_body_ori_future_local(
         return self._select_body_future(
             self.command_manager.ref_body_ori_future_local_matrix
         )[:, :, :, :2, :].reshape(self.num_envs, -1)
+
+
+class body_spatial_motion_local(
+    _tracking_body_future_observation, namespace="mimic_lite"
+):
+    """Per-body reference spatial motion in the current reference anchor."""
+
+    def compute(self):
+        command = self.command_manager
+        current_index = command.obs_current_step_index
+        body_indices = self.body_indices_tracking
+
+        future_position_w = self._select_body_future(command.ref_body_pos_future_w)
+        future_quaternion_w = self._select_body_future(
+            command.ref_body_quat_future_w
+        )
+        current_position_w = torch.index_select(
+            command.ref_body_pos_future_w[:, current_index], 1, body_indices
+        )
+        current_quaternion_w = torch.index_select(
+            command.ref_body_quat_future_w[:, current_index], 1, body_indices
+        )
+        anchor_position_w = command.ref_anchor_pos_future_w[:, current_index]
+        anchor_quaternion_w = command.ref_anchor_quat_future_w[:, current_index]
+
+        future_position, future_quaternion = _body_pose_in_anchor_frame(
+            anchor_position_w[:, None, None],
+            anchor_quaternion_w[:, None, None],
+            future_position_w,
+            future_quaternion_w,
+        )
+        current_position, current_quaternion = _body_pose_in_anchor_frame(
+            anchor_position_w[:, None],
+            anchor_quaternion_w[:, None],
+            current_position_w,
+            current_quaternion_w,
+        )
+        spatial_position, spatial_rotation = _spatial_motion_from_local_poses(
+            future_position,
+            matrix_from_quat(future_quaternion),
+            current_position,
+            matrix_from_quat(current_quaternion),
+        )
+        rotation_6d = spatial_rotation[..., :2, :].reshape(
+            self.num_envs,
+            len(self.future_step_indices),
+            len(self.body_indices_tracking),
+            6,
+        )
+        return torch.cat([spatial_position, rotation_6d], -1).reshape(
+            self.num_envs, -1
+        )
 
 # body_local_diff_obs
 

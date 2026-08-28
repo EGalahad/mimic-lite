@@ -85,6 +85,22 @@ def _body_pose_in_anchor_frame(
     )
 
 
+def _spatial_motion_from_local_poses(
+    future_position: torch.Tensor,
+    future_rotation: torch.Tensor,
+    current_position: torch.Tensor,
+    current_rotation: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return ``T(future) @ inv(T(current))`` for local body poses."""
+    spatial_rotation = future_rotation @ current_rotation.transpose(
+        -1, -2
+    ).unsqueeze(1)
+    spatial_position = future_position - torch.einsum(
+        "nhbij,nbj->nhbi", spatial_rotation, current_position
+    )
+    return spatial_position, spatial_rotation
+
+
 @torch.compile(mode="max-autotune-no-cudagraphs")
 def _compute_current_tracking_state(
     ref_anchor_pos_w: torch.Tensor,
