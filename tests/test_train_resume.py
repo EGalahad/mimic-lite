@@ -12,4 +12,5 @@ _start_iteration = _train._start_iteration
 
 def test_resume_starts_after_the_last_completed_iteration():
     assert _start_iteration(None, 2999) == 0
+    assert _start_iteration("legacy_checkpoint_without_last_iter.pt", 0) == 0
     assert _start_iteration("checkpoint_3000.pt", 2999) == 3000

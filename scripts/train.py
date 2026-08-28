@@ -33,7 +33,7 @@ CONFIG_PATH = FILE_PATH.parent / "cfg"
 
 
 def _start_iteration(checkpoint_path: str | None, current_iter: int) -> int:
-    return current_iter + 1 if checkpoint_path else 0
+    return current_iter + 1 if checkpoint_path and current_iter > 0 else 0
 
 
 @hydra.main(config_path=str(CONFIG_PATH), config_name="train", version_base=None)
