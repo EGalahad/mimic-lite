@@ -3,7 +3,7 @@
 import active_adaptation as aa
 from mimic_lite.tasks.command import RobotTracking
 from active_adaptation.envs.utils import find_bodies, find_sensor_bodies
-from typing import TYPE_CHECKING, cast
+from typing import cast
 import torch
 from mimic_lite.tasks.deferred import DeferredReward as BaseReward
 
@@ -11,9 +11,6 @@ if aa.get_backend() == "isaaclab":
     from isaaclab.sensors import ContactSensor as IsaacContactSensor
 elif aa.get_backend() == "mjlab":
     from mjlab.sensor import ContactSensor as MJLabContactSensor
-
-if TYPE_CHECKING:
-    from mjlab.viewer.viser import ViserMujocoScene
 
 TrackReward = BaseReward[RobotTracking]
 
@@ -101,8 +98,6 @@ class feet_air_time(TrackReward, namespace="mimic_lite"):
         height_range: tuple[float, float] | list[float] = (0.035, 0.155),
         time_factor_range: tuple[float, float] | list[float] = (0.2, 2.0),
         body2_names: str | list[str] | None = None,
-        debug_first_contact_color: tuple[float, float, float, float] = (1.0, 0.0, 0.0, 1.0),
-        debug_air_color: tuple[float, float, float, float] = (0.1, 0.4, 1.0, 1.0),
         **kwargs,
     ):
         self.asset = self.env.scene.articulations["robot"]
@@ -157,11 +152,6 @@ class feet_air_time(TrackReward, namespace="mimic_lite"):
         self.air_time_factor_high = float(time_factor_range[1])
         self.air_time_factor_span = self.air_time_factor_high - self.air_time_factor_low
 
-        self.debug_first_contact_color = debug_first_contact_color
-        self.debug_air_color = debug_air_color
-        self.debug_first_contact_size = 0.2
-        self.debug_air_size = 0.2
-
     def reset(self, env_ids, reset_td=None):
         self.current_contact[env_ids] = False
         self.prev_contact[env_ids] = False
@@ -183,8 +173,6 @@ class feet_air_time(TrackReward, namespace="mimic_lite"):
         )
         air_ratio = ((feet_height - self.air_h_low) / self.air_h_span).clamp(0.0, 1.0)
         self.air_ratio.copy_(air_ratio)
-        # print(feet_height[0])
-        # print(air_ratio[0])
         air_time_factor = self.air_time_factor_low + air_ratio * self.air_time_factor_span
 
         self.current_air_time += self.env.step_dt * air_time_factor
@@ -199,75 +187,6 @@ class feet_air_time(TrackReward, namespace="mimic_lite"):
         )
         reward *= ~self.command_manager.is_standing_env
         return reward
-
-    def debug_draw(self):
-        positions = self.asset.data.body_link_pos_w[:, self.body_indices].clone()
-        first_contact = self.is_first_contact
-        in_air = ~self.current_contact
-        air_ratio = self.air_ratio
-
-        if aa.get_backend() == "isaaclab":
-            debug_draw = getattr(self.env, "debug_draw", None)
-            if debug_draw is None:
-                return
-
-            positions = positions.detach().cpu()
-            first_contact = first_contact.detach().cpu()
-            in_air = in_air.detach().cpu()
-            air_ratio = air_ratio.detach().cpu()
-
-            first_contact_points = positions[first_contact]
-            if first_contact_points.numel() > 0:
-                debug_draw.point(
-                    first_contact_points,
-                    color=self.debug_first_contact_color,
-                    size=self.debug_first_contact_size,
-                )
-
-            air_points = positions[in_air]
-            air_sizes = (air_ratio[in_air] * self.debug_air_size).tolist()
-            if air_points.numel() > 0 and air_sizes:
-                debug_draw._draw.draw_points(
-                    air_points.reshape(-1, 3).tolist(),
-                    [self.debug_air_color] * len(air_sizes),
-                    air_sizes,
-                )
-            return
-
-        viewer = getattr(self.env.sim, "viewer", None)
-        if viewer is None:
-            return
-        scene: "ViserMujocoScene" | None = getattr(viewer, "scene", None)
-        if scene is None:
-            return
-
-        positions = positions.detach().cpu()
-        first_contact = first_contact.detach().cpu()
-        in_air = in_air.detach().cpu()
-        air_ratio = air_ratio.detach().cpu()
-
-        if scene.show_all_envs or self.num_envs == 1:
-            env_ids = range(self.num_envs)
-        else:
-            env_ids = [int(scene.env_idx)]
-
-        for env_idx in env_ids:
-            for body_idx in range(len(self.body_indices)):
-                if first_contact[env_idx, body_idx]:
-                    # print(f"env {env_idx} body {body_idx} first contact, size {self.debug_first_contact_size}")
-                    scene.add_sphere(
-                        positions[env_idx, body_idx],
-                        self.debug_first_contact_size,
-                        self.debug_first_contact_color,
-                    )
-                if in_air[env_idx, body_idx]:
-                    # print(f"env {env_idx} body {body_idx} in air, size {self.debug_air_size}")
-                    scene.add_sphere(
-                        positions[env_idx, body_idx],
-                        self.debug_air_size * float(air_ratio[env_idx, body_idx]),
-                        self.debug_air_color,
-                    )
-
 
 class feet_contact_count(TrackReward, namespace="mimic_lite"):
     supported_backends = ("isaaclab", "mjlab")
