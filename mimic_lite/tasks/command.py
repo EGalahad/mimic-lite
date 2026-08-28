@@ -668,7 +668,23 @@ class RobotTracking(Command, namespace="mimic_lite"):
         if self.viz.mode == "ghost":
             if self._ghost_model is None:
                 self._ghost_model = copy.deepcopy(sim.mj_model)
-                self._ghost_model.geom_rgba[:] = self.viz.ghost_color
+                robot_body_ids = set(
+                    np.asarray(
+                        self.asset.data.indexing.body_ids.cpu().numpy()
+                    ).reshape(-1)
+                )
+                for geom_id in range(self._ghost_model.ngeom):
+                    body_id = int(self._ghost_model.geom_bodyid[geom_id])
+                    group_id = int(self._ghost_model.geom_group[geom_id])
+                    visible = (
+                        body_id in robot_body_ids
+                        and group_id < len(scene.geom_groups_visible)
+                        and scene.geom_groups_visible[group_id]
+                    )
+                    if visible:
+                        self._ghost_model.geom_rgba[geom_id] = self.viz.ghost_color
+                    else:
+                        self._ghost_model.geom_rgba[geom_id, 3] = 0.0
 
             indexing = self.asset.indexing
             free_joint_q_adr = indexing.free_joint_q_adr.cpu().numpy()
