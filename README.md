@@ -2,12 +2,13 @@
 
 ## Setup
 
-Clone the `active-adaptation` repository and the MimicLite project:
+Clone the matching `dev/mimic-hdmi-v08` branches. Active Adaptation no longer
+embeds MimicLite as a submodule, so clone the two repositories independently:
 
 ```bash
-git clone -b dev/hdmi https://github.com/Agent-3154/active-adaptation.git
+git clone -b dev/mimic-hdmi-v08 https://github.com/Agent-3154/active-adaptation.git
 cd active-adaptation
-git clone https://github.com/EGalahad/mimic-lite projects/mimic-lite
+git clone -b dev/mimic-hdmi-v08 https://github.com/EGalahad/mimic-lite projects/mimic-lite
 ```
 
 Setup uv venv directories and install dependencies:
