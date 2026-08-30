@@ -8,11 +8,62 @@ import torch
 import torch.nn as nn
 from tensordict import TensorDict
 
-from active_adaptation.learning.ppo.common import REWARD_KEY
+from active_adaptation.learning.ppo.common import DONE_KEY, GAE, REWARD_KEY, TERM_KEY
 from mimic_lite_learning.ppo_roa import PPOConfig, PPOROA
 
 
 class PPOROAAlignmentTest(unittest.TestCase):
+    def test_multigroup_rewards_are_concatenated_before_gae(self) -> None:
+        policy = object.__new__(PPOROA)
+        nn.Module.__init__(policy)
+        policy.cfg = SimpleNamespace(
+            clip_neg_reward=False,
+            normalize_before_sum=True,
+        )
+        policy.reward_groups = ["tracking", "loco"]
+        policy.reward_scales = torch.full((2,), 0.5)
+        policy.gae = GAE(0.99, 0.95)
+        policy.value_norm = SimpleNamespace(
+            denormalize=lambda value: value,
+            normalize=lambda value: value,
+            update=lambda value: None,
+        )
+        batch_shape = (1, 3)
+        shape = (*batch_shape, 4)
+        rewards = TensorDict(
+            {
+                "tracking": torch.ones(*shape, 1),
+                "loco": torch.full((*shape, 1), 2.0),
+            },
+            batch_size=shape,
+        )
+        tensordict = TensorDict(
+            {
+                REWARD_KEY: rewards,
+                "state_value": torch.zeros(*shape, 2),
+                TERM_KEY: torch.zeros(*shape, 1, dtype=torch.bool),
+                DONE_KEY: torch.zeros(*shape, 1, dtype=torch.bool),
+                "is_init": torch.zeros(*shape, 1, dtype=torch.bool),
+                "next": TensorDict(
+                    {
+                        "state_value": torch.zeros(*shape, 2),
+                        "discount": torch.ones(*shape, 1),
+                    },
+                    batch_size=batch_shape,
+                ),
+            },
+            batch_size=batch_shape,
+        )
+
+        with (
+            patch("mimic_lite_learning.ppo_roa.aa.is_distributed", return_value=True),
+            patch("mimic_lite_learning.ppo_roa.dist.all_reduce"),
+        ):
+            policy._compute_advantage(tensordict, nn.Identity())
+
+        self.assertEqual(tensordict[REWARD_KEY].shape, (*shape, 2))
+        self.assertEqual(tensordict["ret"].shape, (*shape, 2))
+
     def test_teacher_recipe_defaults_are_aligned(self) -> None:
         cfg = PPOConfig()
 

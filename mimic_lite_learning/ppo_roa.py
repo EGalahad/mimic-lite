@@ -920,6 +920,11 @@ class PPOROA(PPOBase):
         next_values = tensordict["next", "state_value"]
 
         rewards = tensordict[REWARD_KEY]
+        if isinstance(rewards, TensorDict):
+            rewards = torch.cat(
+                [rewards[group_name] for group_name in self.reward_groups], dim=-1
+            )
+            tensordict.set(REWARD_KEY, rewards)
         if self.cfg.clip_neg_reward:
             rewards = rewards.clamp_min(0.0)
         discount = tensordict["next", "discount"]
