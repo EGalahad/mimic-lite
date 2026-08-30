@@ -1,13 +1,13 @@
+import os
 import warnings
 from collections import OrderedDict
 from contextlib import nullcontext
 from dataclasses import dataclass
-from typing import List, Tuple, Union, Mapping
-import os
+from typing import List, Mapping, Tuple, Union
 
 import torch
-import torch.distributions as D
 import torch.distributed as dist
+import torch.distributions as D
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils._pytree as pytree
@@ -15,46 +15,51 @@ from hydra.core.config_store import ConfigStore
 from tensordict import TensorDict
 from tensordict.nn import (
     TensorDictModule as Mod,
+)
+from tensordict.nn import (
     TensorDictSequential as Seq,
+)
+from tensordict.nn import (
     set_composite_lp_aggregate,
 )
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torchrl.data import Composite as CompositeSpec, TensorSpec
+from torchrl.data import Composite as CompositeSpec
+from torchrl.data import TensorSpec
 from torchrl.envs.transforms import TensorDictPrimer
 from torchrl.modules import ProbabilisticActor
 
 import active_adaptation as aa
+from active_adaptation.learning.modules import CatTensors
 from active_adaptation.learning.modules.distributions import IndependentNormal
 from active_adaptation.learning.modules.vecnorm import VecNorm
-from active_adaptation.learning.modules import CatTensors
 from active_adaptation.learning.ppo.common import (
     ACTION_KEY,
     CMD_KEY,
     DONE_KEY,
+    GAE,
     OBS_KEY,
     OBS_PRIV_KEY,
     REWARD_KEY,
     TERM_KEY,
-    GAE,
     make_batch,
     make_mlp,
 )
+from active_adaptation.learning.ppo.ppo_base import PPOBase
 from active_adaptation.learning.utils.opt import MuonAdamWWrapper
 from active_adaptation.learning.utils.valuenorm import ValueNorm1, ValueNormFake
-from active_adaptation.learning.ppo.ppo_base import PPOBase
 from active_adaptation.utils.profiling import ScopedTimer
+
 from .common import (
-    ActorROA,
-    CMD_SHORT_KEY,
-    MeanAction,
-    NullVecNorm,
-    ObsOODDetector,
+    CMD_LONG_KEY,
     PRIV_STUDENT_KEY,
     PRIV_TEACHER_KEY,
     REF_JPOS_KEY,
+    ActorROA,
+    MeanAction,
+    NullVecNorm,
+    ObsOODDetector,
     check_vecnorm_divergence,
 )
-
 
 torch.set_float32_matmul_precision("high")
 
@@ -121,7 +126,7 @@ class PPOConfig:
     # Experimental until the encoder-clipping ablation establishes the default.
     finetune_clip_encoder_grads: bool = False
     checkpoint_path: Union[str, None] = None
-    in_keys: Tuple[str, ...] = (CMD_KEY, CMD_SHORT_KEY, OBS_KEY, OBS_PRIV_KEY)
+    in_keys: Tuple[str, ...] = (CMD_KEY, CMD_LONG_KEY, OBS_KEY, OBS_PRIV_KEY)
 
     grad_sync_mode: str | None = "ddp"  # Options: "ddp", "manual", None
     manual_construct_dist_now: bool = True
@@ -243,13 +248,13 @@ class PPOROA(PPOBase):
         if missing_keys:
             raise KeyError(f"Missing required observation keys: {missing_keys}")
 
-        encoder_student_in_keys = [OBS_KEY, CMD_SHORT_KEY]
-        critic_in_keys = [OBS_PRIV_KEY, OBS_KEY, CMD_KEY]
+        encoder_student_in_keys = [OBS_KEY, CMD_KEY]
+        critic_in_keys = [OBS_PRIV_KEY, OBS_KEY, CMD_LONG_KEY]
 
         latent_dim = self.cfg.latent_dim
-        encoder_teacher_in_keys = (
-            [OBS_PRIV_KEY] if self.cfg.teacher_use_priv else [OBS_KEY, CMD_KEY]
-        )
+        encoder_teacher_in_keys = [OBS_KEY, CMD_LONG_KEY]
+        if self.cfg.teacher_use_priv:
+            encoder_teacher_in_keys.insert(0, OBS_PRIV_KEY)
         self.encoder_teacher = Seq(
             CatTensors(
                 encoder_teacher_in_keys,
@@ -347,7 +352,12 @@ class PPOROA(PPOBase):
         self.actor_student = build_actor([OBS_KEY, PRIV_STUDENT_KEY])
 
         self.critic = Seq(
-            CatTensors(critic_in_keys, "_critic_input", del_keys=False),
+            CatTensors(
+                critic_in_keys,
+                "_critic_input",
+                del_keys=False,
+                sort=False,
+            ),
             Mod(
                 nn.Sequential(
                     make_mlp(
@@ -436,7 +446,7 @@ class PPOROA(PPOBase):
         self.vecnorms: Mapping[str, VecNorm] = nn.ModuleDict()
         vecnorm_cls = NullVecNorm if self.cfg.vecnorm is None else VecNorm
 
-        keys_to_norm = [CMD_KEY, CMD_SHORT_KEY, OBS_KEY, OBS_PRIV_KEY]
+        keys_to_norm = [CMD_KEY, CMD_LONG_KEY, OBS_KEY, OBS_PRIV_KEY]
         for key in keys_to_norm:
             if key not in observation_spec.keys(True, True):
                 continue

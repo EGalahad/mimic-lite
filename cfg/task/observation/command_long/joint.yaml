@@ -1,0 +1,12 @@
+# @package task.observation.command_long
+
+defaults:
+  - /task/observation/command@_here_: joint
+  - _self_
+
+ref_root_pos_future_local:
+  future_steps: ${task.command.future_steps}
+ref_root_ori_future_b:
+  future_steps: ${task.command.future_steps}
+ref_joint_pos_future:
+  future_steps: ${task.command.future_steps}

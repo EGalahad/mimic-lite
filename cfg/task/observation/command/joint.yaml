@@ -3,10 +3,14 @@
 ref_root_pos_future_local:
   _target_: mimic_lite.ref_body_pos_future_local
   body_names: ${task.shared.root_body_name}
+  future_steps: [-8, -4, -2, 0, 1, 2, 3, 4]
   noise_std: 0.005
 ref_root_ori_future_b:
   _target_: mimic_lite.ref_root_ori_future_b
+  future_steps: [-8, -4, -2, 0, 1, 2, 3, 4]
   noise_std: 0.05
 
 ref_joint_pos_future:
   _target_: mimic_lite.ref_joint_pos_future
+  future_steps: [-8, -4, -2, 0, 1, 2, 3, 4]
+  noise_std: 0.0

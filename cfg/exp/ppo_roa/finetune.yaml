@@ -1,6 +1,7 @@
 # @package _global_
 
 defaults:
+  - /task/observation/command_long: joint
   - /algo/ppo_roa/module: large
   - override /algo: ppo_roa_finetune
 

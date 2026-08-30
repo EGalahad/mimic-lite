@@ -1,20 +1,19 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
 import unittest
+from types import SimpleNamespace
 
 import hydra
 import torch
-from omegaconf import OmegaConf
-from tensordict import TensorDict
-from torchrl.data import Bounded, Composite, Unbounded
-
 from mimic_lite_learning.fast_sac import FastSAC, FastSACConfig
 from mimic_lite_learning.fast_td3 import FastTD3, FastTD3Config
 from mimic_lite_learning.ppo import PPOConfig, PPOPolicy
-from mimic_lite_learning.ppo_roa import PPOConfig as PPOROAConfig
 from mimic_lite_learning.ppo_roa import PPOROA
+from mimic_lite_learning.ppo_roa import PPOConfig as PPOROAConfig
 from mimic_lite_learning.sac import SAC, SACConfig
+from omegaconf import OmegaConf
+from tensordict import TensorDict
+from torchrl.data import Bounded, Composite, Unbounded
 
 
 class _FakeActionManager:
@@ -38,7 +37,7 @@ class _FakeEnv:
         self.observation_spec = Composite(
             policy=Unbounded(shape=(num_envs, 5)),
             command=Unbounded(shape=(num_envs, 3)),
-            command_short=Unbounded(shape=(num_envs, 2)),
+            command_long=Unbounded(shape=(num_envs, 4)),
             priv=Unbounded(shape=(num_envs, 7)),
             shape=(num_envs,),
         )
@@ -53,6 +52,7 @@ class _FakeEnv:
             {
                 "policy": torch.zeros(self.num_envs, 5),
                 "command": torch.zeros(self.num_envs, 3),
+                "command_long": torch.zeros(self.num_envs, 4),
                 "priv": torch.zeros(self.num_envs, 7),
                 "done": torch.zeros(self.num_envs, 1, dtype=torch.bool),
                 "terminated": torch.zeros(self.num_envs, 1, dtype=torch.bool),
@@ -61,6 +61,7 @@ class _FakeEnv:
                 "next": {
                     "policy": torch.zeros(self.num_envs, 5),
                     "command": torch.zeros(self.num_envs, 3),
+                    "command_long": torch.zeros(self.num_envs, 4),
                     "priv": torch.zeros(self.num_envs, 7),
                     "reward": torch.zeros(self.num_envs, 1),
                     "stats": TensorDict({}, batch_size=[self.num_envs]),
@@ -163,12 +164,36 @@ class PolicyFactoryApiTest(unittest.TestCase):
                 encoder_teacher_dims=(8,),
                 encoder_student_dims=(8,),
                 latent_dim=4,
-                in_keys=("command", "command_short", "policy", "priv"),
+                in_keys=("command", "command_long", "policy", "priv"),
             ),
             env,
             device="cpu",
         )
         self.assertIsInstance(ppo_roa, PPOROA)
+        self.assertEqual(ppo_roa.encoder_student.in_keys, ["policy", "command"])
+        self.assertEqual(
+            ppo_roa.encoder_teacher.in_keys, ["priv", "policy", "command_long"]
+        )
+        self.assertEqual(
+            ppo_roa.critic.in_keys, ["priv", "policy", "command_long"]
+        )
+
+        ppo_roa_no_priv = PPOROA.from_env(
+            PPOROAConfig(
+                actor_hidden_dims=(8,),
+                critic_hidden_dims=(8,),
+                encoder_teacher_dims=(8,),
+                encoder_student_dims=(8,),
+                latent_dim=4,
+                teacher_use_priv=False,
+                in_keys=("command", "command_long", "policy", "priv"),
+            ),
+            env,
+            device="cpu",
+        )
+        self.assertEqual(
+            ppo_roa_no_priv.encoder_teacher.in_keys, ["policy", "command_long"]
+        )
 
         sac = SAC.from_env(
             SACConfig(
