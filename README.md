@@ -2,13 +2,13 @@
 
 ## Setup
 
-Clone the matching `dev/mimic-hdmi-v08` branches. Active Adaptation no longer
-embeds MimicLite as a submodule, so clone the two repositories independently:
+Clone the current main branches. Active Adaptation no longer embeds MimicLite
+as a submodule, so clone the two repositories independently:
 
 ```bash
-git clone -b dev/mimic-hdmi-v08 https://github.com/Agent-3154/active-adaptation.git
+git clone https://github.com/Agent-3154/active-adaptation.git
 cd active-adaptation
-git clone -b dev/mimic-hdmi-v08 https://github.com/EGalahad/mimic-lite projects/mimic-lite
+git clone https://github.com/EGalahad/mimic-lite projects/mimic-lite
 ```
 
 Setup uv venv directories and install dependencies:
@@ -59,15 +59,21 @@ Training motion datasets are available in the [any4hdmi Hugging Face collection]
 
 ## Released Checkpoints
 
-The released checkpoint set contains three PPO policies trained for 4,000 iterations. Wall-clock times are reported on RTX 4090 GPUs.
+The public release set now exposes only the latest 16x16384 G1 mixture Huge
+policies. Training compute is reported as GPU hours on RTX 4090 GPUs.
 
-| Policy | Actor hidden dimensions | Parallel environments | Checkpoint | Wall-clock time |
+| Policy | Actor hidden dimensions | Parallel environments | Checkpoint | GPU hours |
 | --- | --- | ---: | --- | ---: |
-| MimicLite-Huge | `[1024, 1024, 1024]` | `32 × 8192` | [`xua2csee`](https://wandb.ai/elijahgalahad/mimic_lite/runs/xua2csee) | 3 h 30 min |
-| MimicLite-Base | `[256, 256, 256]` | `8 × 8192` | [`iij0q0b5`](https://wandb.ai/elijahgalahad/mimic_lite/runs/iij0q0b5) | 2 h 57 min |
-| MimicLite-Small | `[128, 128, 128]` | `4 × 8192` | [`zb9e19ih`](https://wandb.ai/elijahgalahad/mimic_lite/runs/zb9e19ih) | 3 h 00 min |
+| MimicLite-PPO | `[1024, 1024, 1024]` | `16 × 16384` | [`4234dd57`](https://wandb.ai/elijahgalahad/mimic_lite/runs/4234dd57) | 92.3 |
+| MimicLite-ROA | `[1024, 1024, 1024]` | `16 × 16384` (`train -> adapt -> finetune`) | [`9287d8e0`](https://wandb.ai/elijahgalahad/mimic_lite/runs/9287d8e0) | 173.2 |
 
-Training-time sources: Huge [`55ie49o5`](https://wandb.ai/elijahgalahad/mimic_lite/runs/55ie49o5), Base [`07k900hl`](https://wandb.ai/elijahgalahad/mimic_lite/runs/07k900hl), and Small [`akq50h1n`](https://wandb.ai/elijahgalahad/mimic_lite/runs/akq50h1n).
+Download the deploy ONNX and YAML from the shared sim2real artifacts:
+[MimicLite-PPO](https://drive.google.com/drive/folders/1xRmcOX0l-YIpqxUuCmW4s6Dl0HStbJSL)
+and
+[MimicLite-ROA](https://drive.google.com/drive/folders/1AFcvP4oDbEskx-wip5bJN-JBaUvwp8MH).
+Older Huge/Base/v1.1 releases are retained only in the Drive archive.
+
+![Canonical cross-codebase tracking evaluation](assets/mimic_lite_cross_codebase_tracking_eval.png)
 
 ## Train
 
@@ -101,7 +107,7 @@ uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
   task=tracking-base task/motion=g1/lafan \
   +exp=ppo/train algo/ppo/module=huge \
   task.num_envs=4 task.termination.root_pos_error.enabled=false \
-  checkpoint_path=run:elijahgalahad/mimic_lite/xua2csee
+  checkpoint_path=run:elijahgalahad/mimic_lite/4234dd57
 ```
 
 Play only the student from a PPO-ROA finetune checkpoint:
@@ -113,7 +119,7 @@ uv --project venv/mjlab run \
   +task/patches=teacher_future_t16 \
   +exp=ppo_roa/finetune algo/ppo_roa/module=huge \
   task.num_envs=1 task.termination.root_pos_error.enabled=false \
-  checkpoint_path=<finetune-checkpoint>
+  checkpoint_path=run:elijahgalahad/mimic_lite/9287d8e0
 ```
 
 ## Troubleshooting
