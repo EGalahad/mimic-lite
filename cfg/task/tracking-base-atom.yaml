@@ -9,6 +9,7 @@ defaults:
 
 name: Atom01TrackBase
 project: mimic_lite
+nan_guard: sanitize
 
 shared:
   root_body_name: base_link

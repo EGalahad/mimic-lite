@@ -9,6 +9,7 @@ defaults:
 
 name: G1TrackBase
 project: mimic_lite
+nan_guard: sanitize
 
 shared:
   root_body_name: pelvis
