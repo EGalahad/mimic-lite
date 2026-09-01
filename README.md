@@ -67,6 +67,8 @@ policies. Training compute is reported as GPU hours on RTX 4090 GPUs.
 | MimicLite-PPO | `[1024, 1024, 1024]` | `16 × 16384` | [`4234dd57`](https://wandb.ai/elijahgalahad/mimic_lite/runs/4234dd57) | 92.3 |
 | MimicLite-ROA | `[1024, 1024, 1024]` | `16 × 16384` (`train -> adapt -> finetune`) | [`9287d8e0`](https://wandb.ai/elijahgalahad/mimic_lite/runs/9287d8e0) | 173.2 |
 
+Compare the released policies on the [Motion Tracking Leaderboard](https://egalahad.github.io/sim2real/leaderboard).
+
 Download the deploy ONNX and YAML from the shared sim2real artifacts:
 [MimicLite-PPO](https://drive.google.com/drive/folders/1xRmcOX0l-YIpqxUuCmW4s6Dl0HStbJSL)
 and
