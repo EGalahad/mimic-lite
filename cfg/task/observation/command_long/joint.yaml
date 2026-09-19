@@ -6,7 +6,10 @@ defaults:
 
 ref_root_pos_future_local:
   future_steps: ${task.command.future_steps}
+  noise_std: 0.0
 ref_root_ori_future_b:
   future_steps: ${task.command.future_steps}
+  noise_std: 0.0
 ref_joint_pos_future:
   future_steps: ${task.command.future_steps}
+  noise_std: 0.0

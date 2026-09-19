@@ -1,0 +1,12 @@
+# @package task
+# Adapt/Finetune: four-second torso XY displacement plus absolute torso Z.
+shared:
+  reward_root_body_name: torso_link
+reward:
+  tracking:
+    root_pos:
+      _target_: mimic_lite.windowed_root_displacement_exp
+      history_steps: [200]
+termination:
+  root_pos_error:
+    is_timeout: true

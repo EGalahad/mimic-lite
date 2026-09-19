@@ -1,0 +1,25 @@
+# @package task
+# Shared robot tracking contract of the September 2026 v1.1 release.
+defaults:
+  - teacher_future_t16
+  - _self_
+observation:
+  command:
+    ref_root_pos_future_local:
+      noise_std: 0.002
+    ref_root_ori_future_b:
+      noise_std: 0.02
+    ref_joint_pos_future:
+      noise_std: 0.01
+reward:
+  tracking:
+    arm_keypoint_pos:
+      _target_: mimic_lite.body_pos_local_exp
+      body_names: [".*_shoulder_yaw_link", ".*_elbow_link", ".*_palm_link"]
+      weight: 0.5
+      sigma: 0.05
+    arm_keypoint_ori:
+      _target_: mimic_lite.body_ori_local_exp
+      body_names: [".*_shoulder_yaw_link", ".*_elbow_link", ".*_palm_link"]
+      weight: 0.5
+      sigma: 0.1

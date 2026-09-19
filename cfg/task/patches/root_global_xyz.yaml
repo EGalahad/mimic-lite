@@ -1,0 +1,12 @@
+# @package task
+# Teacher: absolute torso XYZ; no sliding window.
+shared:
+  reward_root_body_name: torso_link
+reward:
+  tracking:
+    root_pos:
+      _target_: mimic_lite.body_pos_exp
+      history_steps: null
+termination:
+  root_pos_error:
+    is_timeout: false

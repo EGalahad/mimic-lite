@@ -1,0 +1,50 @@
+# @package task
+defaults:
+  - tracking-base
+  - override motion: h2/retargeted
+  - _self_
+
+name: H2TrackBase
+
+shared:
+  obs_body_names:
+    - pelvis
+    - ".*_knee_link"
+    - ".*_ankle_pitch_link"
+    - head_yaw_link
+    - ".*_shoulder_yaw_link"
+    - ".*_elbow_link"
+    - ".*_wrist_yaw_link"
+  tracking_body_names:
+    - pelvis
+    - torso_link
+    - ".*_hip_yaw_link"
+    - ".*_knee_link"
+    - ".*_ankle_pitch_link"
+    - head_yaw_link
+    - ".*_shoulder_yaw_link"
+    - ".*_elbow_link"
+    - ".*_wrist_yaw_link"
+  tracking_joint_names: [".*"]
+  reward_joint_names: [".*"]
+
+robot:
+  name: unitree_h2
+
+input:
+  action:
+    action_scaling:
+      head_pitch_joint: 0.35
+      head_yaw_joint: 0.35
+
+reward:
+  loco:
+    feet_air_time:
+      body2_names: null
+
+randomization:
+  actuator_params:
+    stiffness_range:
+      "head_.*": [0.9, 1.1]
+    damping_range:
+      "head_.*": [0.9, 1.1]

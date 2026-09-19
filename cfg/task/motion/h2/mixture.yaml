@@ -1,0 +1,16 @@
+# @package task.command
+
+motion_cfgs:
+  lafan:
+    path: ${oc.env:H2_LAFAN_DATASET,../any4hdmi/output/h2/lafan}
+    weight: 0.3
+    full_motion: true
+  style100:
+    path: ${oc.env:H2_100STYLE_DATASET,../any4hdmi/output/h2/100style}
+    weight: 0.3
+    full_motion: true
+  sonic:
+    path: ${oc.env:H2_SONIC_DATASET,../any4hdmi/output/h2/retargeted}
+    weight: 0.4
+    full_motion: true
+    shard: true
