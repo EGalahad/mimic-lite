@@ -6,7 +6,7 @@ ref_root_pos_future_local:
   noise_std: 0.005
 ref_root_ori_future_b:
   _target_: mimic_lite.ref_root_ori_future_b
-  noise_std: 0.05
+  noise_std: 0.02
 
 ref_body_pos_future_local:
   _target_: mimic_lite.ref_body_pos_future_local

@@ -127,10 +127,11 @@ observation:
       _target_: mimic_lite.projected_gravity_history
       history_steps: [0, 1, 2, 3, 4, 8, 16]
       noise_std: 0.01
+      bias_noise_std: 0.03
     joint_pos_history:
       _target_: mimic_lite.joint_pos_history
       history_steps: [0, 1, 2, 3, 4, 8, 16]
-      noise_std: 0.02
+      noise_std: 0.01
     joint_vel_history:
       _target_: mimic_lite.joint_vel_history
       history_steps: [0, 1, 2, 3, 4, 8, 16]

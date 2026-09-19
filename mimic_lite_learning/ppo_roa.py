@@ -1034,13 +1034,6 @@ class PPOROA(PPOBase):
             policy_loss = -(torch.min(surr1, surr2)[valid]).mean()
             entropy_loss = -self.entropy_coef * entropy
 
-        with ScopedTimer("training.policy.ppo.critic", sync=PROFILE_SYNC_TIMERS):
-            with self._train_autocast():
-                b_returns = tensordict["ret"]
-                values = self.critic(tensordict)["state_value"]
-                value_loss = F.mse_loss(b_returns, values, reduction="none")
-                value_loss = value_loss[valid].mean(dim=0)
-
         with ScopedTimer("training.policy.ppo.reg_loss", sync=PROFILE_SYNC_TIMERS):
             with self._train_autocast():
                 if self.cfg.phase == "train":
@@ -1056,17 +1049,23 @@ class PPOROA(PPOBase):
                 else:
                     reg_loss = torch.zeros((), device=self.device)
 
-        loss = (
-            policy_loss
-            + entropy_loss
-            + value_loss.mean()
-            + self.reg_coef * reg_loss
-        )
-
-        with ScopedTimer("training.policy.ppo.backward", sync=PROFILE_SYNC_TIMERS):
+        # Critic reads raw observations and has disjoint parameters. Release the
+        # policy graph before its forward; both optimizers still step only after
+        # both backwards, synchronization and the original gradient clipping.
+        with ScopedTimer("training.policy.ppo.backward.policy", sync=PROFILE_SYNC_TIMERS):
             self.opt_policy.zero_grad()
             self.opt_critic.zero_grad()
-            loss.backward()
+            (policy_loss + entropy_loss + self.reg_coef * reg_loss).backward()
+
+        with ScopedTimer("training.policy.ppo.critic", sync=PROFILE_SYNC_TIMERS):
+            with self._train_autocast():
+                b_returns = tensordict["ret"]
+                values = self.critic(tensordict)["state_value"]
+                value_loss = F.mse_loss(b_returns, values, reduction="none")
+                value_loss = value_loss[valid].mean(dim=0)
+
+        with ScopedTimer("training.policy.ppo.backward.critic", sync=PROFILE_SYNC_TIMERS):
+            value_loss.mean().backward()
         if aa.is_distributed() and self.cfg.grad_sync_mode == "manual":
             with ScopedTimer(
                 "training.policy.ppo.grad_sync", sync=PROFILE_SYNC_TIMERS

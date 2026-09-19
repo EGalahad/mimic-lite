@@ -202,6 +202,10 @@ def main(cfg: DictConfig):
         data_buf: TensorDict = (
             tmp_td.unsqueeze(-1).expand(env.num_envs, cfg.algo.train_every).clone()
         )
+        del tmp_td, tmp_carry
+        if env.device.type == "cuda":
+            # Warp allocates outside PyTorch's caching allocator.
+            torch.cuda.empty_cache()
 
         progress = range(start_iter, total_iters)
         if aa.is_main_process():

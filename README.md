@@ -85,6 +85,32 @@ bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py 
   algo/ppo/module=huge backend=mjlab
 ```
 
+Prepare the H2 motion dataset:
+
+```bash
+uv --project venv/mjlab run projects/mimic-lite/scripts/convert_h2_dataset.py \
+  --source-root hf://junsooki/h2_retargeted_motions@295019f02a1ea913d2679602a59783e68a5c40bc \
+  --out-dir ../any4hdmi/output/h2/retargeted \
+  --target-fps 50
+```
+
+Train H2 tracking:
+
+```bash
+bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
+  task=tracking-base-h2 task/motion=h2/retargeted +exp=ppo/train \
+  algo/ppo/module=huge backend=mjlab
+```
+
+Quick play smoke test:
+
+```bash
+uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
+  task=tracking-base-h2 task/motion=h2/retargeted \
+  +exp=ppo/train algo/ppo/module=huge \
+  task.num_envs=4 task.termination.root_pos_error.enabled=false
+```
+
 Run PPO-ROA sequential training (`train -> adapt -> finetune`) with the Huge
 module on one 8-GPU node:
 

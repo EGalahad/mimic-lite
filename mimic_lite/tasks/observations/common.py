@@ -4,7 +4,7 @@ import torch
 from typing import cast
 import active_adaptation as aa
 from active_adaptation.envs.utils import find_bodies, find_joints
-from active_adaptation.utils.math import quat_rotate_inverse
+from active_adaptation.utils.math import quat_rotate_inverse, quat_from_angle_axis, quat_mul
 from mimic_lite.tasks.actions import JointPosition
 from mimic_lite.tasks.deferred import DeferredObservation as BaseObservation
 
@@ -15,7 +15,24 @@ elif aa.get_backend() == "mjlab":
 
 
 def random_noise(x: torch.Tensor, std: float):
-    return x + torch.randn_like(x).clamp(-3.0, 3.0) * std
+    """HEFT convention: std is a uniform half-range, not a Gaussian sigma."""
+    return x + (torch.rand_like(x) * 2.0 - 1.0) * std
+
+
+def add_spherical_noise(x: torch.Tensor, scale: float):
+    """Uniform radius in [0, scale] with an isotropic direction."""
+    direction = torch.randn_like(x)
+    direction = direction / direction.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+    radius = torch.rand_like(x[..., :1]) * scale
+    return x + direction * radius
+
+
+def perturb_quaternion(quat: torch.Tensor, scale: float):
+    """Left-compose an isotropic rotation with angle uniform in +/- scale radians."""
+    axis = torch.randn_like(quat[..., 1:])
+    axis = axis / axis.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+    angle = (torch.rand_like(quat[..., 0]) * 2.0 - 1.0) * scale
+    return quat_mul(quat_from_angle_axis(angle, axis), quat)
 
 
 def _get_simulation_joint_selection(asset, joint_names: str, device: torch.device):
@@ -43,13 +60,13 @@ class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
         value = self.asset.data.root_com_ang_vel_b[env_ids]
         value = value.unsqueeze(1).expand(-1, self.buffer_size, -1)
         if self.noise_std > 0:
-            value = random_noise(value, self.noise_std)
+            value = add_spherical_noise(value, self.noise_std)
         self.buffer[env_ids] = value
 
     def update(self):
         value = self.asset.data.root_com_ang_vel_b
         if self.noise_std > 0:
-            value = random_noise(value, self.noise_std)
+            value = add_spherical_noise(value, self.noise_std)
         self.head = (self.head - 1) % self.buffer_size
         self.buffer[:, self.head] = value
 
@@ -59,31 +76,39 @@ class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
 
 
 class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
-    def _initialize_impl(self, noise_std: float = 0.0, history_steps: list[int] = [1]):
+    def _initialize_impl(self, noise_std: float = 0.0, history_steps: list[int] = [1], bias_noise_std: float = 0.0):
         self.asset = self.env.scene.articulations["robot"]
         self.noise_std = noise_std
+        self.bias_noise_std = bias_noise_std
         self.history_steps = history_steps
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
         self.head = 0
         self.buffer = torch.zeros((self.num_envs, self.buffer_size, 3), device=self.device)
+        self.bias_quat = torch.zeros((self.num_envs, 4), device=self.device)
+        self.bias_quat[:, 0] = 1.0
         self.reset(torch.arange(self.num_envs, device=self.device))
 
-    def reset(self, env_ids, reset_td=None):
-        value = self.asset.data.projected_gravity_b[env_ids]
-        value = value.unsqueeze(1).expand(-1, self.buffer_size, -1)
+    def _value(self, env_ids):
+        quat = quat_mul(self.bias_quat[env_ids], self.asset.data.root_link_quat_w[env_ids])
         if self.noise_std > 0:
-            value = random_noise(value, self.noise_std)
-            value = value / value.norm(dim=-1, keepdim=True).clamp_min(1e-6)
-        self.buffer[env_ids] = value
+            quat = perturb_quaternion(quat, self.noise_std)
+        gravity = torch.zeros_like(quat[..., 1:])
+        gravity[..., 2] = -1.0
+        value = quat_rotate_inverse(quat, gravity)
+        return value / value.norm(dim=-1, keepdim=True).clamp_min(1e-6)
+
+    def reset(self, env_ids, reset_td=None):
+        bias = torch.zeros_like(self.bias_quat[env_ids])
+        bias[:, 0] = 1.0
+        if self.bias_noise_std > 0:
+            bias = perturb_quaternion(bias, self.bias_noise_std)
+        self.bias_quat[env_ids] = bias
+        self.buffer[env_ids] = self._value(env_ids).unsqueeze(1)
 
     def update(self):
-        value = self.asset.data.projected_gravity_b
-        if self.noise_std > 0:
-            value = random_noise(value, self.noise_std)
-            value = value / value.norm(dim=-1, keepdim=True).clamp_min(1e-6)
         self.head = (self.head - 1) % self.buffer_size
-        self.buffer[:, self.head] = value
+        self.buffer[:, self.head] = self._value(slice(None))
 
     def compute(self):
         indices = (self.history_offsets + self.head) % self.buffer_size

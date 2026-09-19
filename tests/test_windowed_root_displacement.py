@@ -1,8 +1,13 @@
 import math
+from types import SimpleNamespace
 
 import torch
 
-from mimic_lite.tasks.rewards.track import WindowedRootDisplacementBuffer
+from mimic_lite.tasks.rewards.track import (
+    WindowedRootDisplacementBuffer,
+    body_pos_exp,
+    windowed_root_displacement_exp,
+)
 
 
 def _run(
@@ -53,3 +58,53 @@ def test_windowed_root_reset_drops_selected_history() -> None:
     )
     torch.testing.assert_close(residual, torch.tensor([[0.2, -0.1]]))
     torch.testing.assert_close(error, torch.tensor([math.sqrt(0.05)]))
+
+
+def test_windowed_xyz_keeps_absolute_height_and_resets_selected_envs() -> None:
+    # XYZ-axis cases plus a combined residual; select torso rather than body 0.
+    offsets = torch.tensor([[0.15, 0, 0], [0, 0.2, 0], [0, 0, 0.3], [0.3, 0.4, 1.2]])
+    reference = torch.zeros(4, 2, 3)
+    reference[:, 1, 2] = 0.8
+    robot = reference.clone()
+    robot[:, 1] += offsets
+    reward = SimpleNamespace(
+        body_indices_tracking=[1],
+        command_manager=SimpleNamespace(
+            robot_body_link_pos_w=robot,
+            ref_body_pos_w=reference,
+        ),
+        history=WindowedRootDisplacementBuffer(4, (200,), "cpu"),
+        error=torch.zeros(4),
+        sigma=0.3,
+    )
+    for step in range(201):
+        robot[:, 1, 0] += 0.02
+        reference[:, 1, 0] += 0.02
+        windowed_root_displacement_exp.update(reward)
+        expected = offsets.norm(dim=-1) if step < 200 else offsets[:, 2].abs()
+        torch.testing.assert_close(reward.error, expected, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(
+        windowed_root_displacement_exp._compute(reward),
+        torch.exp(-offsets[:, 2].abs() / reward.sigma).unsqueeze(1),
+        atol=1e-5, rtol=1e-5,
+    )
+
+    windowed_root_displacement_exp.reset(reward, torch.tensor([0, 3]))
+    windowed_root_displacement_exp.update(reward)
+    torch.testing.assert_close(reward.error, torch.tensor([0.15, 0, 0.3, 1.3]), atol=1e-5, rtol=1e-5)
+    assert reward.history.robot_history.shape == (4, 201, 2)
+
+
+def test_global_root_reward_keeps_xyz_offset() -> None:
+    offsets = torch.tensor([[0.15, 0, 0], [0, 0.2, 0], [0, 0, 0.3], [0.3, 0.4, 1.2]])
+    reward = SimpleNamespace(
+        body_indices_tracking=[1],
+        command_manager=SimpleNamespace(
+            body_pos_error=torch.stack((torch.zeros(4), offsets.norm(dim=-1)), dim=1),
+        ),
+        sigma=0.3,
+    )
+    torch.testing.assert_close(
+        body_pos_exp._compute(reward),
+        torch.exp(-offsets.norm(dim=-1) / reward.sigma).unsqueeze(1),
+    )

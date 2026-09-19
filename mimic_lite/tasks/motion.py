@@ -236,6 +236,10 @@ def _parse_cli_args() -> argparse.Namespace:
         default=50,
         help="Target FPS used for interpolation and qpos cache keys.",
     )
+    parser.add_argument(
+        "--filenames-path",
+        help="Optional motion-filename allowlist relative to the dataset root.",
+    )
     return parser.parse_args()
 
 
@@ -250,6 +254,7 @@ def main() -> None:
     dataset = create_dataset_from_path(
         root_path=root_path,
         target_fps=args.target_fps,
+        filenames_path=args.filenames_path,
     )
     _validate_motion_dataset(dataset)
     print(

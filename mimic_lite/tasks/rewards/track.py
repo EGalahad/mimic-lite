@@ -118,6 +118,8 @@ class body_pos_exp(_tracking_body, namespace="mimic_lite"):
 
 
 class windowed_root_displacement_exp(_tracking_body, namespace="mimic_lite"):
+    """Track windowed XY displacement and absolute world-height error."""
+
     def _initialize_impl(
         self,
         history_steps: Sequence[int] = (200,),
@@ -142,11 +144,13 @@ class windowed_root_displacement_exp(_tracking_body, namespace="mimic_lite"):
 
     def update(self) -> None:
         body_index = self.body_indices_tracking[0]
+        robot_pos = self.command_manager.robot_body_link_pos_w[:, body_index]
+        reference_pos = self.command_manager.ref_body_pos_w[:, body_index]
         error, _ = self.history.update(
-            self.command_manager.robot_body_link_pos_w[:, body_index, :2],
-            self.command_manager.ref_body_pos_w[:, body_index, :2],
+            robot_pos[:, :2],
+            reference_pos[:, :2],
         )
-        self.error.copy_(error)
+        self.error.copy_(torch.hypot(error, robot_pos[:, 2] - reference_pos[:, 2]))
 
     def _compute(self):
         return torch.exp(-self.error / self.sigma).unsqueeze(1)

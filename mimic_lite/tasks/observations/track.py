@@ -2,7 +2,7 @@ from mimic_lite.tasks.command import RobotTracking
 from mimic_lite.tasks.actions import JointPosition
 
 from active_adaptation.utils.string import resolve_matching_names
-from active_adaptation.utils.math import matrix_from_quat
+from active_adaptation.utils.math import matrix_from_quat, quat_from_matrix
 from mimic_lite.tasks.deferred import DeferredObservation as BaseObservation
 from mimic_lite.tasks.transforms import (
     _body_pose_in_anchor_frame,
@@ -11,6 +11,8 @@ from mimic_lite.tasks.transforms import (
 
 import torch
 from typing import cast, List
+
+from mimic_lite.tasks.observations.common import random_noise, add_spherical_noise, perturb_quaternion
 
 TrackObservation = BaseObservation[RobotTracking]
 
@@ -69,9 +71,7 @@ class ref_joint_pos_future(_tracking_future_step_observation, namespace="mimic_l
             self.command_manager.ref_joint_pos_future_
         ).reshape(self.num_envs, -1)
         if self.noise_std > 0.0:
-            joint_pos += (
-                torch.randn_like(joint_pos).clamp(-3.0, 3.0) * self.noise_std
-            )
+            joint_pos = random_noise(joint_pos, self.noise_std)
         return joint_pos
 
 
@@ -134,9 +134,8 @@ class ref_root_ori_future_b(_tracking_future_step_observation, namespace="mimic_
             self.command_manager.ref_root_ori_future_b_matrix
         )
         if self.noise_std > 0.0:
-            ref_root_ori_future_b = ref_root_ori_future_b.clone()
-            ref_root_ori_future_b += (
-                torch.randn_like(ref_root_ori_future_b).clamp(-3.0, 3.0) * self.noise_std
+            ref_root_ori_future_b = matrix_from_quat(
+                perturb_quaternion(quat_from_matrix(ref_root_ori_future_b), self.noise_std)
             )
         return ref_root_ori_future_b[:, :, :2, :].reshape(self.num_envs, -1)
 
@@ -216,9 +215,9 @@ class ref_body_pos_future_local(
             self.command_manager.ref_body_pos_future_local
         ).reshape(self.num_envs, -1)
         if self.noise_std > 0.0:
-            ref_body_pos_future_local += (
-                torch.randn_like(ref_body_pos_future_local).clamp(-3.0, 3.0) * self.noise_std
-            )
+            ref_body_pos_future_local = add_spherical_noise(
+                ref_body_pos_future_local.reshape(self.num_envs, -1, 3), self.noise_std
+            ).reshape(self.num_envs, -1)
         return ref_body_pos_future_local
 
 

@@ -219,6 +219,7 @@ def _build_g1_cfg(mode: int, backend: str):
     body_names = _with_toe_body_names(list(BODY_NAMES_SIMULATION))
 
     if backend == "mjlab":
+        body_names.extend(["left_palm_link", "right_palm_link"])
         import mujoco
         from active_adaptation.assets.asset_cfg import AssetSpec, EntityCfg
         from mjlab.actuator import BuiltinPositionActuatorCfg

@@ -140,7 +140,10 @@ def export_policy(cfg: DictConfig, env: "_EnvBase", policy) -> None:
     policy_config["body_names_simulation"] = asset.cfg.body_names_simulation
     policy_config["joint_kp"] = asset_meta["joint_kp"]
     policy_config["joint_kd"] = asset_meta["joint_kd"]
-    policy_config["default_joint_pos"] = asset_meta["default_joint_pos"]
+    default_joint_pos = asset.data.default_joint_pos[0].detach().cpu().tolist()
+    policy_config["default_joint_pos"] = dict(
+        zip(asset.joint_names, default_joint_pos, strict=True)
+    )
 
     # Make joint observation order explicit for sim2real consumers.
     from mimic_lite.tasks.command import RobotTracking

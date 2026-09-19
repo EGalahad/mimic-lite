@@ -83,7 +83,10 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
     rollout_policy = policy.get_rollout_policy("eval")
     steps = int(cfg.get("eval_steps", 1000))
     store_rollout = bool(cfg.get("store_rollout", True))
+    # Policy construction consumes RNG differently across architectures.
+    torch.manual_seed(int(cfg.seed))
     carry = env.reset()
+    initial_motion_ids = env.base_env.command_manager.motion_ids.detach().cpu().clone()
     motion_length = _initial_motion_length(carry, env)
     first_done_step = torch.full(
         (int(env.num_envs),),
@@ -172,6 +175,7 @@ def fixed_step_eval(cfg: DictConfig, env: "_EnvBase", policy) -> TensorDict:
     return TensorDict(
         {
             "rollout": rollout,
+            "initial_motion_ids": initial_motion_ids,
             "lafan_progress": TensorDict(
                 {
                     "progress": lafan_progress.detach().cpu(),
