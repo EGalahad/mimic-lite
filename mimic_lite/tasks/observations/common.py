@@ -53,6 +53,7 @@ class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
         self.head = 0
+        self.history_indices = self.history_offsets.clone()
         self.buffer = torch.zeros((self.num_envs, self.buffer_size, 3), device=self.device)
         self.reset(torch.arange(self.num_envs, device=self.device))
 
@@ -68,10 +69,11 @@ class root_ang_vel_history(BaseObservation, namespace="mimic_lite"):
         if self.noise_std > 0:
             value = add_spherical_noise(value, self.noise_std)
         self.head = (self.head - 1) % self.buffer_size
+        self.history_indices = (self.history_offsets + self.head) % self.buffer_size
         self.buffer[:, self.head] = value
 
     def compute(self) -> torch.Tensor:
-        indices = (self.history_offsets + self.head) % self.buffer_size
+        indices = self.history_indices
         return self.buffer[:, indices].reshape(self.num_envs, -1)
 
 
@@ -84,6 +86,7 @@ class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
         self.head = 0
+        self.history_indices = self.history_offsets.clone()
         self.buffer = torch.zeros((self.num_envs, self.buffer_size, 3), device=self.device)
         self.bias_quat = torch.zeros((self.num_envs, 4), device=self.device)
         self.bias_quat[:, 0] = 1.0
@@ -108,10 +111,11 @@ class projected_gravity_history(BaseObservation, namespace="mimic_lite"):
 
     def update(self):
         self.head = (self.head - 1) % self.buffer_size
+        self.history_indices = (self.history_offsets + self.head) % self.buffer_size
         self.buffer[:, self.head] = self._value(slice(None))
 
     def compute(self):
-        indices = (self.history_offsets + self.head) % self.buffer_size
+        indices = self.history_indices
         return self.buffer[:, indices].reshape(self.num_envs, -1)
 
 
@@ -126,6 +130,7 @@ class joint_pos_history(BaseObservation, namespace="mimic_lite"):
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
         self.head = 0
+        self.history_indices = self.history_offsets.clone()
         self.noise_std = max(noise_std, 0.0)
 
         self.asset = self.env.scene.articulations["robot"]
@@ -149,6 +154,7 @@ class joint_pos_history(BaseObservation, namespace="mimic_lite"):
 
     def update(self):
         self.head = (self.head - 1) % self.buffer_size
+        self.history_indices = (self.history_offsets + self.head) % self.buffer_size
         value = self.asset.data.joint_pos[:, self.joint_ids]
         if self.noise_std > 0:
             value = random_noise(value, self.noise_std)
@@ -161,7 +167,7 @@ class joint_pos_history(BaseObservation, namespace="mimic_lite"):
         joint_pos = self.buffer - self.action_manager.offset[
             :, self.joint_ids
         ].unsqueeze(1)
-        indices = (self.history_offsets + self.head) % self.buffer_size
+        indices = self.history_indices
         joint_pos_selected = joint_pos[:, indices]
         return joint_pos_selected.reshape(self.num_envs, -1)
 
@@ -176,6 +182,7 @@ class joint_vel_history(BaseObservation, namespace="mimic_lite"):
         self.buffer_size = max(history_steps) + 1
         self.history_offsets = torch.as_tensor(history_steps, device=self.device)
         self.head = 0
+        self.history_indices = self.history_offsets.clone()
         self.noise_std = max(noise_std, 0.0)
         self.asset = self.env.scene.articulations["robot"]
         self.joint_ids, self.joint_names = _get_simulation_joint_selection(
@@ -197,6 +204,7 @@ class joint_vel_history(BaseObservation, namespace="mimic_lite"):
 
     def update(self):
         self.head = (self.head - 1) % self.buffer_size
+        self.history_indices = (self.history_offsets + self.head) % self.buffer_size
         value = self.asset.data.joint_vel[:, self.joint_ids]
         if self.noise_std > 0:
             value = random_noise(value, self.noise_std)
@@ -204,7 +212,7 @@ class joint_vel_history(BaseObservation, namespace="mimic_lite"):
 
     def compute(self):
         joint_vel = self.buffer
-        indices = (self.history_offsets + self.head) % self.buffer_size
+        indices = self.history_indices
         joint_vel_selected = joint_vel[:, indices]
         return joint_vel_selected.reshape(self.num_envs, -1)
 
