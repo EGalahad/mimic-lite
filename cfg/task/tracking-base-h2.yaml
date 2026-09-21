@@ -29,7 +29,7 @@ shared:
   reward_joint_names: [".*"]
 
 robot:
-  name: unitree_h2
+  name: mlite-h2
 
 input:
   action:

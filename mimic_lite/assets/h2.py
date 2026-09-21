@@ -169,4 +169,4 @@ def make_cfg(backend: Literal["mjlab"] | str):
     return make_mjlab_cfg()
 
 
-registry.register("asset", "unitree_h2", make_cfg)
+registry.register("asset", "mlite-h2", make_cfg)
