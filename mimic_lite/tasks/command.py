@@ -216,6 +216,7 @@ class RobotTracking(Command, namespace="mimic_lite"):
             self.dataset.joint_names.index(joint_name)
             for joint_name in self.asset.joint_names
         ]
+        self._cache_motion_indices()
         self.pose_range = torch.tensor(self._pose_range_cfg, device=self.device)
         self.velocity_range = torch.tensor(self._velocity_range_cfg, device=self.device)
 
@@ -266,6 +267,18 @@ class RobotTracking(Command, namespace="mimic_lite"):
             self._read_current_robot_state()
             self._refresh_future_buffers()
             self.update()
+
+    def _cache_motion_indices(self) -> None:
+        """Avoid rebuilding CPU list indices during each GPU rollout step."""
+        self._tracking_body_indices_motion_device = torch.as_tensor(
+            self.tracking_body_indices_motion, dtype=torch.long, device=self.device
+        )
+        self._tracking_joint_indices_motion_device = torch.as_tensor(
+            self.tracking_joint_indices_motion, dtype=torch.long, device=self.device
+        )
+        self._asset_joint_idx_motion_device = torch.as_tensor(
+            self.asset_joint_idx_motion, dtype=torch.long, device=self.device
+        )
 
     def _sample_motions(
         self,
@@ -372,8 +385,8 @@ class RobotTracking(Command, namespace="mimic_lite"):
             torch.cat([positions, orientations], dim=-1), env_ids=env_ids
         )
         self._write_root_com_velocity(velocities, env_ids)
-        init_joint_pos = motion_reset.joint_pos[:, self.asset_joint_idx_motion]
-        init_joint_vel = motion_reset.joint_vel[:, self.asset_joint_idx_motion]
+        init_joint_pos = motion_reset.joint_pos[:, self._asset_joint_idx_motion_device]
+        init_joint_vel = motion_reset.joint_vel[:, self._asset_joint_idx_motion_device]
 
         joint_pos_noise = sample_uniform(
             -1, 1, init_joint_pos.shape, device=self.device
@@ -475,8 +488,8 @@ class RobotTracking(Command, namespace="mimic_lite"):
                 steps=self.future_steps,
             )
         motion = self.future_ref_motion
-        body_indices = self.tracking_body_indices_motion
-        joint_indices = self.tracking_joint_indices_motion
+        body_indices = self._tracking_body_indices_motion_device
+        joint_indices = self._tracking_joint_indices_motion_device
         env_origins = self.env.scene.env_origins
 
         self.ref_body_pos_future_w = (
@@ -582,8 +595,8 @@ class RobotTracking(Command, namespace="mimic_lite"):
                 env_ids=env_ids,
             )
             self.asset.write_joint_state_to_sim(
-                motion.joint_pos[:, time_index, self.asset_joint_idx_motion],
-                motion.joint_vel[:, time_index, self.asset_joint_idx_motion],
+                motion.joint_pos[:, time_index, self._asset_joint_idx_motion_device],
+                motion.joint_vel[:, time_index, self._asset_joint_idx_motion_device],
                 env_ids=env_ids,
             )
             if self.env.backend == "mjlab":

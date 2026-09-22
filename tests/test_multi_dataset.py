@@ -213,6 +213,21 @@ class MultiDatasetTest(unittest.TestCase):
         torch.testing.assert_close(
             result.body_pos_w[:, :, 0, 0], torch.tensor([[3.0, 4.0], [1.0, 2.0]])
         )
+        expected = torch.cat(
+            [
+                dataset.datasets[1].get_slice(
+                    torch.tensor([0]), torch.tensor([0]), torch.tensor([0, 1])
+                ),
+                dataset.datasets[0].get_slice(
+                    torch.tensor([0]), torch.tensor([0]), torch.tensor([0, 1])
+                ),
+            ], dim=0,
+        )
+        for field in (
+            "motion_id", "step", "body_pos_w", "body_lin_vel_w",
+            "body_quat_w", "body_ang_vel_w", "joint_pos", "joint_vel",
+        ):
+            self.assertTrue(torch.equal(getattr(result, field), getattr(expected, field)), field)
 
     def test_mixed_resident_windowed_routing_keeps_input_order(self) -> None:
         windowed = _windowed_stub()

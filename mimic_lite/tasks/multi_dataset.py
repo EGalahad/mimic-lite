@@ -398,6 +398,25 @@ class MultiMotionDataset(BaseDataset):
             return self.datasets[0].get_slice(motion_ids, starts, steps)
 
         dataset_ids = torch.bucketize(motion_ids, self.route_ends, right=True)
+        if self._resident_data is not None and all(self._resident_flags):
+            # All routes have fixed-size GPU storage: dynamic nonzero() routing
+            # would synchronize the host on every policy frame.
+            assert self._resident_route_starts is not None
+            assert self._resident_route_ends is not None
+            resident_starts = self._resident_route_starts[motion_ids]
+            resident_ends = self._resident_route_ends[motion_ids]
+            index = (resident_starts + starts).unsqueeze(1) + steps.unsqueeze(0)
+            index.clamp_max_(resident_ends.unsqueeze(1) - 1)
+            index.clamp_min_(resident_starts.unsqueeze(1))
+            result = convert_motion_data(
+                self._resident_data[index], float_dtype=torch.float32
+            )
+            result.motion_id = (
+                result.motion_id
+                - self._resident_motion_id_offsets[dataset_ids].unsqueeze(1)
+            )
+            return result
+
         parts = []
         positions = []
         if self._resident_data is not None:
