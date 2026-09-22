@@ -227,13 +227,6 @@ reward:
       sensor_name: self_collision
       force_threshold: 1.0
 
-    feet_slip:
-      _target_: mimic_lite.feet_slip
-      weight: 0.5
-      tolerance: 0.0
-      enabled: false
-      body_names: .*ankle_roll_link
-
     feet_air_time:
       _target_: mimic_lite.feet_air_time
       weight: 4.0

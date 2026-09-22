@@ -23,8 +23,9 @@ class _cum_error_mixin:
 
     def update(self):
         self.__exceeded = self.error >= self.threshold
-        self.__cum_steps[self.__exceeded] += 1
-        self.__cum_steps[~self.__exceeded] = 0
+        self.__cum_steps = torch.where(
+            self.__exceeded, self.__cum_steps + 1, torch.zeros_like(self.__cum_steps)
+        )
 
     def reset(self, env_ids, reset_td=None):
         self.__cum_steps[env_ids] = 0
@@ -58,10 +59,11 @@ class cum_body_pos_error(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_pos_error = self.command_manager.body_pos_error[:, self.body_indices_tracking]
@@ -81,10 +83,11 @@ class cum_body_z_error(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_pos_error = (
@@ -107,10 +110,11 @@ class cum_body_ori_error(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_ori_error = self.command_manager.body_ori_error[:, self.body_indices_tracking]
@@ -130,10 +134,11 @@ class cum_body_lin_vel_error(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_lin_vel_error = self.command_manager.body_lin_vel_error[
@@ -155,10 +160,11 @@ class cum_body_ang_vel_error(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_ang_vel_error = self.command_manager.body_ang_vel_error[
@@ -180,10 +186,11 @@ class cum_body_pos_error_local(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_pos_error = self.command_manager.body_pos_error_local[:, self.body_indices_tracking]
@@ -202,10 +209,11 @@ class cum_body_ori_error_local(_cum_error_mixin, RobotTrackTermination):
         self.body_names = resolve_matching_names(
             body_names, self.command_manager.tracking_body_names
         )[1]
-        self.body_indices_tracking = [
-            self.command_manager.tracking_body_names.index(name)
-            for name in self.body_names
-        ]
+        self.body_indices_tracking = torch.as_tensor(
+            [self.command_manager.tracking_body_names.index(name) for name in self.body_names],
+            dtype=torch.long,
+            device=self.device,
+        )
 
     def update(self):
         body_ori_error = self.command_manager.body_ori_error_local[:, self.body_indices_tracking]
