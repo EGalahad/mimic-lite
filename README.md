@@ -59,19 +59,28 @@ Training motion datasets are available in the [any4hdmi Hugging Face collection]
 
 ## Released Checkpoints
 
-The public release set now exposes only the latest 16x16384 G1 mixture Huge
-policies. Training compute is reported as GPU hours on RTX 4090 GPUs.
+The public releases include the 16x16384 G1 mixture Huge policies and the
+8x8192 MimicLite v1.1 ROA student. GPU hours are measured training compute;
+the PPO/ROA Huge runs used RTX 4090 GPUs, while v1.1 used RTX 4090 for Train
+and Adapt and RTX PRO 6000 for Finetune.
 
 | Policy | Actor hidden dimensions | Parallel environments | Checkpoint | GPU hours |
 | --- | --- | ---: | --- | ---: |
 | MimicLite-PPO | `[1024, 1024, 1024]` | `16 × 16384` | [`4234dd57`](https://wandb.ai/elijahgalahad/mimic_lite/runs/4234dd57) | 92.3 |
 | MimicLite-ROA | `[1024, 1024, 1024]` | `16 × 16384` (`train -> adapt -> finetune`) | [`9287d8e0`](https://wandb.ai/elijahgalahad/mimic_lite/runs/9287d8e0) | 173.2 |
+| MimicLite-v1.1 (ROA student) | `[512, 512, 512]` | `8 × 8192` (`train -> adapt -> finetune`) | [Deploy ONNX + YAML](https://drive.google.com/drive/folders/1lrPyiiy7anyG3P4wHNIQQQlydboLPd9e) (`checkpoints/mimic-lite/v1_1`) | 50.106 |
 
 Download the deploy ONNX and YAML from the shared sim2real artifacts:
 [MimicLite-PPO](https://drive.google.com/drive/folders/1xRmcOX0l-YIpqxUuCmW4s6Dl0HStbJSL)
 and
 [MimicLite-ROA](https://drive.google.com/drive/folders/1AFcvP4oDbEskx-wip5bJN-JBaUvwp8MH).
-Older Huge/Base/v1.1 releases are retained only in the Drive archive.
+MimicLite v1.1 is a supported release, trained for 4,000 / 1,000 / 2,000
+Train / Adapt / Finetune updates. Its original training used
+`wandb.mode=disabled`, so it has no online W&B run; the table links to its
+released deploy files instead. Teacher observations and reward targets are
+clean, with reference-motion observation noise only on the student command.
+See the [MotionDecode leaderboard](https://egalahad.github.io/sim2real/leaderboard/)
+for its evaluation. Older Huge/Base releases remain in the Drive archive.
 
 ![Canonical cross-codebase tracking evaluation](assets/mimic_lite_cross_codebase_tracking_eval.png)
 
