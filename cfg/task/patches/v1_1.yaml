@@ -15,11 +15,11 @@ reward:
   tracking:
     arm_keypoint_pos:
       _target_: mimic_lite.body_pos_local_exp
-      body_names: [".*_shoulder_yaw_link", ".*_elbow_link", ".*_palm_link"]
+      body_names: ${task.shared.arm_keypoint_body_names}
       weight: 0.5
       sigma: 0.05
     arm_keypoint_ori:
       _target_: mimic_lite.body_ori_local_exp
-      body_names: [".*_shoulder_yaw_link", ".*_elbow_link", ".*_palm_link"]
+      body_names: ${task.shared.arm_keypoint_body_names}
       weight: 0.5
       sigma: 0.1
