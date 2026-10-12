@@ -70,6 +70,8 @@ and Adapt and RTX PRO 6000 for Finetune.
 | MimicLite-ROA | `[1024, 1024, 1024]` | `16 × 16384` (`train -> adapt -> finetune`) | [`9287d8e0`](https://wandb.ai/elijahgalahad/mimic_lite/runs/9287d8e0) | 173.2 |
 | MimicLite-v1.1 (ROA student) | `[512, 512, 512]` | `8 × 8192` (`train -> adapt -> finetune`) | [Deploy ONNX + YAML](https://drive.google.com/drive/folders/1lrPyiiy7anyG3P4wHNIQQQlydboLPd9e) (`checkpoints/mimic-lite/v1_1`) | 50.106 |
 
+MimicLite also supports **H2, AgiBot A3, and RoboParty RP1 (28 or 24 DoF)** on mjlab and IsaacLab. See [supported robots and released checkpoints](docs/checkpoints.md) for model-matched downloads and motion profiles.
+
 Download the deploy ONNX and YAML from the shared sim2real artifacts:
 [MimicLite-PPO](https://drive.google.com/drive/folders/1xRmcOX0l-YIpqxUuCmW4s6Dl0HStbJSL)
 and
@@ -86,76 +88,69 @@ for its evaluation. Older Huge/Base releases remain in the Drive archive.
 
 ## Train
 
-Run single-stage PPO:
+Run commands from the Active Adaptation repository. Select a robot with
+`task/robot=g1|h2|a3|rp1|rp1_24dof`; G1 is the default.
+Each profile selects matching assets, joints, rewards and default motion data.
+An explicit `task/motion=...` overrides that default. Existing `tracking-base-*`
+task aliases remain available.
+
+Run single-stage G1 PPO:
 
 ```bash
 bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=tracking-base task/motion=g1/mixture +exp=ppo/train \
-  algo/ppo/module=huge backend=mjlab
+  task=tracking-base task/robot=g1 task/motion=g1/mixture +exp=ppo/train \
+  algo/ppo/module=huge backend=mjlab wandb.mode=online
 ```
 
-Prepare the H2 motion dataset:
-
-```bash
-uv --project venv/mjlab run projects/mimic-lite/scripts/convert_h2_dataset.py \
-  --source-root hf://junsooki/h2_retargeted_motions@295019f02a1ea913d2679602a59783e68a5c40bc \
-  --out-dir ../any4hdmi/output/h2/retargeted \
-  --target-fps 50
-```
-
-Train H2 tracking:
-
-```bash
-bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py venv/mjlab \
-  task=tracking-base-h2 task/motion=h2/retargeted +exp=ppo/train \
-  algo/ppo/module=huge backend=mjlab
-```
-
-Quick play smoke test:
-
-```bash
-uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
-  task=tracking-base-h2 task/motion=h2/retargeted \
-  +exp=ppo/train algo/ppo/module=huge \
-  task.num_envs=4 task.termination.root_pos_error.enabled=false
-```
-
-Run PPO-ROA sequential training (`train -> adapt -> finetune`) with the Huge
-module on one 8-GPU node:
+Run A3 through the three ROA stages (4,000 Train, 1,000 Adapt,
+2,000 Finetune updates), with 8 GPUs and 8,192 environments per GPU:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
-uv --project venv/mjlab run \
-  projects/mimic-lite/scripts/train_sequential.py \
-  task/motion=g1/mixture \
-  +task/patches=teacher_future_t16 \
-  algo/ppo_roa/module=huge \
-  task.num_envs=8192
+uv run --project venv/mjlab projects/mimic-lite/scripts/train_sequential.py \
+  task=tracking-base task/robot=a3 backend=mjlab \
+  stages=v1_1 algo/ppo_roa/module=large task.num_envs=8192 wandb.mode=online
 ```
 
-If this runs out of memory, append `task.command.diff_future_steps=[0,1]`.
+Replace `a3` with another robot selector to use its default motions.
+For IsaacLab, use `--project venv/isaaclab` and `backend=isaaclab`.
+Cache the referenced HF assets and datasets once before a distributed offline
+launch, then set `HF_HUB_OFFLINE=1` and `HF_HUB_DISABLE_TELEMETRY=1`.
+Authenticate W&B before starting formal training.
 
-Play a PPO checkpoint:
+The optional `task/motion=a3/soma` profile accepts a robot-matched,
+filtered any4hdmi dataset through `A3_SOMA_MOTION_DATASET`. It uses the existing
+512-frame windowed loader (`full_motion: false`); it does not download, retarget
+or filter source data. Download the SOMA source yourself, convert it to the robot-matched any4hdmi
+format, and filter it locally. Set `A3_SOMA_MOTION_DATASET` to the resulting
+local dataset directory. SOMA motion data is not hosted on Hugging Face.
+
+## Play and export
+
+Play the G1 PPO release:
 
 ```bash
-uv --project venv/mjlab run projects/mimic-lite/scripts/play.py \
-  task=tracking-base task/motion=g1/lafan \
+uv run --project venv/mjlab projects/mimic-lite/scripts/play.py \
+  task=tracking-base task/robot=g1 task/motion=g1/lafan \
   +exp=ppo/train algo/ppo/module=huge \
   task.num_envs=4 task.termination.root_pos_error.enabled=false \
   checkpoint_path=run:elijahgalahad/mimic_lite/4234dd57
 ```
 
-Play only the student from a PPO-ROA finetune checkpoint:
+Play a downloaded multi-robot ROA finetune student using its saved configuration:
 
 ```bash
-uv --project venv/mjlab run \
-  projects/mimic-lite/scripts/play.py \
-  task/motion=g1/lafan \
-  +task/patches=teacher_future_t16 \
-  +exp=ppo_roa/finetune algo/ppo_roa/module=huge \
-  task.num_envs=1 task.termination.root_pos_error.enabled=false \
-  checkpoint_path=run:elijahgalahad/mimic_lite/9287d8e0
+uv run --project venv/mjlab projects/mimic-lite/scripts/play.py \
+  --config-path /absolute/path/to/release --config-name training-config \
+  checkpoint_path=/absolute/path/to/release/finetune.pt \
+  backend=mjlab task.num_envs=16 \
+  task.termination.root_pos_error.enabled=false
 ```
+
+Use the matching robot's motions and base/aligned termination when judging
+tracking. ROA deploy uses the finetune student. Add `export_policy=true
+++export_only=true` to export ONNX and its control YAML without playback.
+Export initialization can use a small robot-matched motion configuration.
 
 ## Troubleshooting
 
