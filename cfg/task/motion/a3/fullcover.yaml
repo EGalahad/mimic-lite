@@ -1,0 +1,6 @@
+# @package task.command
+motion_cfgs:
+  a3_motions:
+    path: ${oc.env:A3_MOTION_DATASET,hf://elijahgalahad/any4hdmi-a3-fullcover@b48adf754c582001a31a47050205b0884d24fd81}
+    weight: 1.0
+    full_motion: true

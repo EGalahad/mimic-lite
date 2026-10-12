@@ -1,0 +1,7 @@
+# @package task.command
+# Required pinned, filtered dataset reference; no fallback to raw source motions.
+motion_cfgs:
+  a3_soma_filtered:
+    path: ${oc.env:A3_SOMA_MOTION_DATASET}
+    weight: 1.0
+    full_motion: false

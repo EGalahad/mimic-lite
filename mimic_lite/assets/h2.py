@@ -1,35 +1,13 @@
 from __future__ import annotations
 
-from typing import Literal
-import xml.etree.ElementTree as ET
-from mjhub import resolve_asset_reference
-
 from active_adaptation.registry import Registry
 
 registry = Registry.instance()
 
-H2_MJCF_REF = "hf://elijahgalahad/h2_model@beb532e8717b99816b93baace0c649a599538715/h2.xml"
-H2_XML = resolve_asset_reference(H2_MJCF_REF)
-
-
-def _parse_names() -> tuple[list[str], list[str]]:
-    tree = ET.parse(H2_XML)
-    root = tree.getroot()
-    body_names: list[str] = []
-    joint_names: list[str] = []
-    for elem in root.iter():
-        if elem.tag == "body":
-            name = elem.attrib.get("name")
-            if name and name not in body_names:
-                body_names.append(name)
-        elif elem.tag == "joint":
-            name = elem.attrib.get("name")
-            if name and name not in joint_names:
-                joint_names.append(name)
-    return body_names, joint_names
-
-
-BODY_NAMES_SIMULATION, JOINT_NAMES_SIMULATION = _parse_names()
+H2_MJCF_REF = (
+    "hf://elijahgalahad/h2_model@97909bf17e6d6df6a82df229a92a9e7eb89acd8d/h2.xml"
+)
+H2_URDF_REF = H2_MJCF_REF.rsplit("/", 1)[0] + "/h2.urdf"
 
 INIT_POS = (0.0, 0.0, 1.2)
 INIT_JOINT_POS = {
@@ -40,7 +18,6 @@ INIT_JOINT_POS = {
     ".*_elbow_joint": 0.87,
     "left_shoulder_roll_joint": 0.18,
     "right_shoulder_roll_joint": -0.18,
-    ".*": 0.0,
 }
 
 ROTOR_INERTIAS_5020 = (0.139e-4, 0.017e-4, 0.169e-4)
@@ -53,7 +30,9 @@ ROTOR_INERTIAS_4010 = (0.068e-4, 0.0, 0.0)
 GEARS_4010 = (1, 5, 5)
 
 
-def _reflected_inertia(rotor_inertias: tuple[float, float, float], gears: tuple[float, float, float]) -> float:
+def _reflected_inertia(
+    rotor_inertias: tuple[float, float, float], gears: tuple[float, float, float]
+) -> float:
     return (
         rotor_inertias[0] * (gears[1] * gears[2]) ** 2
         + rotor_inertias[1] * gears[2] ** 2
@@ -78,95 +57,61 @@ def _damping(armature: float) -> float:
     return 2.0 * DAMPING_RATIO * armature * NATURAL_FREQ
 
 
-def _motor_actuator(joint_names_expr: tuple[str, ...], effort: float, armature: float):
-    from mjlab.actuator import BuiltinPositionActuatorCfg
+def make_cfg(backend):
+    from .humanoid import Motor, make_biped
 
-    return BuiltinPositionActuatorCfg(
-        target_names_expr=joint_names_expr,
-        effort_limit=effort,
-        stiffness=_stiffness(armature),
-        damping=_damping(armature),
-        armature=armature,
-        frictionloss=0.01,
-    )
-
-
-def make_mjlab_cfg():
-    import mujoco
-    from mjlab.entity import EntityArticulationInfoCfg
-    from mjlab.sensor import ContactMatch, ContactSensorCfg
-    from mjlab.utils.spec_config import CollisionCfg
-
-    from active_adaptation.assets.asset_cfg import AssetSpec, EntityCfg
-
-    def spec_fn():
-        return mujoco.MjSpec.from_file(str(H2_XML))
-
-    cfg = EntityCfg(
-        init_state=EntityCfg.InitialStateCfg(
-            pos=INIT_POS,
-            joint_pos=INIT_JOINT_POS,
-            joint_vel={".*": 0.0},
-        ),
-        spec_fn=spec_fn,
-        articulation=EntityArticulationInfoCfg(
-            actuators=(
-                _motor_actuator((".*_hip_roll_joint",), 360.0, ARMATURE_7520_22),
-                _motor_actuator((".*_hip_pitch_joint",), 360.0, ARMATURE_7520_22),
-                _motor_actuator((".*_hip_yaw_joint",), 360.0, ARMATURE_7520_14),
-                _motor_actuator((".*_knee_joint",), 360.0, ARMATURE_7520_22),
-                _motor_actuator((".*_ankle_roll_joint",), 19.0, ARMATURE_5020),
-                _motor_actuator((".*_ankle_pitch_joint",), 66.88, 2.0 * ARMATURE_5020),
-                _motor_actuator(("waist_yaw_joint",), 120.0, ARMATURE_7520_14),
-                _motor_actuator(("waist_roll_joint", "waist_pitch_joint"), 180.0, 2.0 * ARMATURE_5020),
-                _motor_actuator((".*_shoulder_pitch_joint",), 120.0, ARMATURE_5020),
-                _motor_actuator((".*_shoulder_roll_joint", ".*_shoulder_yaw_joint", ".*_elbow_joint", ".*_wrist_roll_joint"), 54.0, ARMATURE_5020),
-                _motor_actuator((".*_wrist_pitch_joint", ".*_wrist_yaw_joint"), 25.0, ARMATURE_4010),
-                _motor_actuator(("head_pitch_joint", "head_yaw_joint"), 50.0, ARMATURE_5020),
+    groups = (
+        ((".*_hip_roll_joint",), 360.0, ARMATURE_7520_22),
+        ((".*_hip_pitch_joint",), 360.0, ARMATURE_7520_22),
+        ((".*_hip_yaw_joint",), 360.0, ARMATURE_7520_14),
+        ((".*_knee_joint",), 360.0, ARMATURE_7520_22),
+        ((".*_ankle_roll_joint",), 19.0, ARMATURE_5020),
+        ((".*_ankle_pitch_joint",), 66.88, 2.0 * ARMATURE_5020),
+        (("waist_yaw_joint",), 120.0, ARMATURE_7520_14),
+        (("waist_roll_joint", "waist_pitch_joint"), 180.0, 2.0 * ARMATURE_5020),
+        ((".*_shoulder_pitch_joint",), 120.0, ARMATURE_5020),
+        (
+            (
+                ".*_shoulder_roll_joint",
+                ".*_shoulder_yaw_joint",
+                ".*_elbow_joint",
+                ".*_wrist_roll_joint",
             ),
+            54.0,
+            ARMATURE_5020,
         ),
-        collisions=(
-            CollisionCfg(
-                geom_names_expr=(".*_collision",),
-                contype=1,
-                conaffinity=1,
-                condim={r"^(left|right)_foot[1-7]_collision$": 3, ".*": 1},
-                priority={r"^(left|right)_foot[1-7]_collision$": 1, ".*": 0},
-                friction={r"^(left|right)_foot[1-7]_collision$": (0.6,)},
-                disable_other_geoms=False,
-            ),
-        ),
-        joint_names_simulation=JOINT_NAMES_SIMULATION,
-        body_names_simulation=BODY_NAMES_SIMULATION,
+        ((".*_wrist_pitch_joint", ".*_wrist_yaw_joint"), 25.0, ARMATURE_4010),
+        (("head_pitch_joint", "head_yaw_joint"), 50.0, ARMATURE_5020),
     )
-    sensors = (
-        ContactSensorCfg(
-            name="contact_forces",
-            primary=ContactMatch(mode="subtree", pattern=r"^(left_ankle_roll_link|right_ankle_roll_link)$", entity="robot"),
-            secondary=ContactMatch(mode="body", pattern="terrain", entity=None),
-            fields=("found", "force"),
-            reduce="netforce",
-            num_slots=1,
-            track_air_time=True,
-            history_length=3,
-        ),
-        ContactSensorCfg(
-            name="self_collision",
-            primary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
-            secondary=ContactMatch(mode="subtree", pattern="pelvis", entity="robot"),
-            fields=("found", "force"),
-            reduce="none",
-            num_slots=1,
-            history_length=4,
-        ),
+    return make_biped(
+        backend,
+        mjcf=H2_MJCF_REF,
+        urdf=H2_URDF_REF,
+        pos=INIT_POS,
+        joint_pos=INIT_JOINT_POS,
+        motors=[
+            Motor(
+                names,
+                effort,
+                1000.0,
+                _stiffness(armature),
+                _damping(armature),
+                armature,
+            )
+            for names, effort, armature in groups
+        ],
+        root="pelvis",
+        feet=r"^(left_ankle_roll_link|right_ankle_roll_link)$",
+        collisions={
+            "geom_names_expr": (".*_collision",),
+            "contype": 1,
+            "conaffinity": 1,
+            "condim": {r"^(left|right)_foot[1-7]_collision$": 3, ".*": 1},
+            "priority": {r"^(left|right)_foot[1-7]_collision$": 1, ".*": 0},
+            "friction": {r"^(left|right)_foot[1-7]_collision$": (0.6,)},
+            "disable_other_geoms": False,
+        },
     )
-    return AssetSpec(config=cfg, sensors=sensors)
-
-
-def make_cfg(backend: Literal["mjlab"] | str):
-    if backend != "mjlab":
-        raise ValueError("H2 asset is currently implemented for mjlab only")
-    return make_mjlab_cfg()
 
 
 registry.register("asset", "mlite-h2", make_cfg)

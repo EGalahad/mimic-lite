@@ -1,0 +1,153 @@
+# @package task
+name: A3TrackBase
+shared:
+  root_body_name: pelvis_link
+  anchor_body_name: pelvis_link
+  reward_root_body_name: torso_Link
+  termination_root_body_name: torso_Link
+  obs_body_names:
+  - pelvis_link
+  - .*_knee_Link
+  - .*_ankle_pitch_Link
+  - .*_shoulder_yaw_Link
+  - .*_elbow_Link
+  - .*_wrist_yaw_Link
+  tracking_body_names: &id001
+  - pelvis_link
+  - torso_Link
+  - .*_hip_yaw_Link
+  - .*_knee_Link
+  - .*_ankle_pitch_Link
+  - .*_shoulder_yaw_Link
+  - .*_elbow_Link
+  - .*_wrist_yaw_Link
+  reward_body_names: *id001
+  tracking_joint_names:
+  - waist_.*_joint
+  - .*_hip_.*_joint
+  - .*_knee_joint
+  - .*_ankle_.*_joint
+  - .*_shoulder_.*_joint
+  - .*_elbow_joint
+  - .*_wrist_.*_joint
+  reward_joint_names:
+  - waist_.*_joint
+  - .*_hip_.*_joint
+  - .*_knee_joint
+  - .*_shoulder_.*_joint
+  - .*_elbow_joint
+  - .*_wrist_.*_joint
+  motion_body_names: *id001
+  arm_keypoint_body_names:
+  - .*_shoulder_yaw_Link
+  - .*_elbow_Link
+  - .*_wrist_yaw_Link
+  feet_body_names:
+  - left_ankle_roll_Link
+  - right_ankle_roll_Link
+  toe_body_names: null
+  feet_metric_body_names: .*ankle_roll_Link
+robot:
+  name: mlite-a3
+input:
+  action:
+    action_scaling:
+      left_hip_pitch_joint: 0.6875
+      left_hip_roll_joint: 0.4583333333333333
+      left_hip_yaw_joint: 0.6875
+      left_knee_joint: 0.32
+      left_ankle_pitch_joint: 0.591
+      left_ankle_roll_joint: 0.27375
+      right_hip_pitch_joint: 0.6875
+      right_hip_roll_joint: 0.4583333333333333
+      right_hip_yaw_joint: 0.6875
+      right_knee_joint: 0.32
+      right_ankle_pitch_joint: 0.591
+      right_ankle_roll_joint: 0.27375
+      waist_yaw_joint: 0.6470588235294118
+      waist_roll_joint: 0.23
+      waist_pitch_joint: 0.575
+      left_shoulder_pitch_joint: 0.375
+      left_shoulder_roll_joint: 0.375
+      left_shoulder_yaw_joint: 0.2
+      left_elbow_joint: 0.2
+      left_wrist_roll_joint: 0.2
+      left_wrist_pitch_joint: 0.075
+      left_wrist_yaw_joint: 0.075
+      right_shoulder_pitch_joint: 0.375
+      right_shoulder_roll_joint: 0.375
+      right_shoulder_yaw_joint: 0.2
+      right_elbow_joint: 0.2
+      right_wrist_roll_joint: 0.2
+      right_wrist_pitch_joint: 0.075
+      right_wrist_yaw_joint: 0.075
+reward:
+  loco:
+    feet_air_time: {}
+randomization:
+  perturb_body_materials:
+    body_names:
+    - .*ankle_roll_Link
+    - .*_wrist_yaw_Link
+    static_friction_range:
+    - 0.3
+    - 1.6
+    dynamic_friction_range:
+    - 0.3
+    - 1.2
+    restitution_range:
+    - 0.0
+    - 0.5
+    solref_time_constant_range:
+    - 0.015
+    - 0.03
+    solref_dampratio_range:
+    - 0.5
+    - 2.0
+    homogeneous: true
+  perturb_body_mass:
+    pelvis_link:
+    - 0.9
+    - 1.1
+    torso_Link:
+    - 0.9
+    - 1.1
+  perturb_body_com:
+    pelvis_link|torso_Link:
+    - -0.03
+    - 0.03
+  actuator_params:
+    stiffness_range:
+      .*(shoulder|elbow|wrist).*:
+      - 0.9
+      - 1.1
+      .*(waist|hip|knee|ankle).*:
+      - 0.8
+      - 1.2
+      head_.*:
+      - 0.9
+      - 1.1
+    damping_range:
+      .*(shoulder|elbow|wrist).*:
+      - 0.9
+      - 1.1
+      .*(waist|hip|knee|ankle).*:
+      - 0.8
+      - 1.2
+      head_.*:
+      - 0.9
+      - 1.1
+    armature_range:
+      .*:
+      - 0.75
+      - 1.25
+    friction_range:
+      .*:
+      - 0.05
+      - 0.25
+
+sim:
+  # Public mjlab runtime reads njmax, not the legacy mjlab_njmax key.
+  njmax: 640
+  # A3 floor/self-contact matches exceed the runtime default of 80.
+  contact_sensor_maxmatch: 256

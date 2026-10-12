@@ -1,0 +1,165 @@
+# @package task
+name: RP1TrackBase
+shared:
+  root_body_name: base_link
+  anchor_body_name: base_link
+  reward_root_body_name: waist_yaw_link
+  termination_root_body_name: base_link
+  obs_body_names:
+  - base_link
+  - .*_knee_link
+  - .*_ankle_roll_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist(?:_yaw)?_link
+  tracking_body_names:
+  - base_link
+  - waist_yaw_link
+  - .*_hip_yaw_link
+  - .*_knee_link
+  - .*_ankle_roll_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist(?:_yaw)?_link
+  tracking_joint_names:
+  - waist_.*_joint
+  - .*_hip_.*_joint
+  - .*_knee_joint
+  - .*_ankle_.*_joint
+  - .*_shoulder_.*_joint
+  - .*_elbow_joint
+  - .*_wrist(?:_.*)?_joint
+  reward_joint_names:
+  - waist_.*_joint
+  - .*_hip_.*_joint
+  - .*_knee_joint
+  - .*_shoulder_.*_joint
+  - .*_elbow_joint
+  - .*_wrist(?:_.*)?_joint
+  reward_body_names:
+  - base_link
+  - waist_yaw_link
+  - .*_hip_yaw_link
+  - .*_knee_link
+  - .*_ankle_roll_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist(?:_yaw)?_link
+  motion_body_names:
+  - base_link
+  - waist_yaw_link
+  - .*_hip_yaw_link
+  - .*_knee_link
+  - .*_ankle_roll_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist(?:_yaw)?_link
+  feet_body_names:
+  - left_ankle_roll_link
+  - right_ankle_roll_link
+  toe_body_names: null
+  arm_keypoint_body_names:
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist(?:_yaw)?_link
+  feet_metric_body_names: .*ankle_roll_link
+robot:
+  name: mlite-rp1
+randomization:
+  perturb_body_materials:
+    body_names:
+    - .*
+    static_friction_range:
+    - 0.3
+    - 1.6
+    dynamic_friction_range:
+    - 0.3
+    - 1.2
+    restitution_range:
+    - 0.0
+    - 0.5
+    solref_time_constant_range:
+    - 0.015
+    - 0.03
+    solref_dampratio_range:
+    - 0.5
+    - 2.0
+    homogeneous: true
+  perturb_feet_solref:
+    _target_: perturb_body_materials
+    body_names:
+    - .*ankle_roll_link
+    solref_time_constant_range:
+    - 0.015
+    - 0.03
+    solref_dampratio_range:
+    - 0.5
+    - 2.0
+    homogeneous: true
+  perturb_body_mass:
+    left_(hip_.*|knee|shoulder_.*|elbow)_link|right_(hip_.*|knee|shoulder_.*|elbow)_link:
+    - 0.8
+    - 1.2
+  perturb_base_mass:
+    _target_: perturb_body_mass
+    # Equivalent to +/- 3 kg for the pinned 3.295 kg base.
+    base_link:
+    - 0.08952959028831564
+    - 1.9104704097116842
+  perturb_waist_mass:
+    _target_: perturb_body_mass
+    # Equivalent to +/- 3 kg for the pinned 8.343 kg waist.
+    waist_yaw_link:
+    - 0.6404171161452714
+    - 1.3595828838547286
+  perturb_body_com:
+    base_link:
+    - -0.05
+    - 0.05
+    waist_yaw_link:
+    - -0.05
+    - 0.05
+  actuator_params:
+    stiffness_range:
+      .*(shoulder|elbow|wrist).*:
+      - 0.8
+      - 1.2
+      .*(waist|hip|knee|ankle).*:
+      - 0.8
+      - 1.2
+    damping_range:
+      .*(shoulder|elbow|wrist).*:
+      - 0.8
+      - 1.2
+      .*(waist|hip|knee|ankle).*:
+      - 0.8
+      - 1.2
+    armature_range:
+      .*:
+      - 0.8
+      - 1.2
+    friction_range:
+      .*:
+      - 0.008
+      - 0.012
+sim:
+  mjlab_nconmax: 200
+  mjlab_njmax: 1000
+  njmax: 1000
+  mjlab_occupancy_diagnostics: false
+input:
+  action:
+    action_scaling:
+      .*_hip_yaw_joint: 0.5
+      .*_hip_roll_joint: 0.5
+      .*_hip_pitch_joint: 0.5
+      .*_knee_joint: 0.5
+      .*_ankle_pitch_joint: 0.5
+      .*_ankle_roll_joint: 0.5
+      waist_roll_joint: 0.5
+      waist_yaw_joint: 0.5
+      .*_shoulder_pitch_joint: 1.0
+      .*_shoulder_roll_joint: 1.0
+      .*_shoulder_yaw_joint: 1.0
+      .*_elbow_joint: 1.0
+      .*_wrist(?:_.*)?_joint: 1.0

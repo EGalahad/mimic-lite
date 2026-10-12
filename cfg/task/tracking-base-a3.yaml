@@ -1,0 +1,5 @@
+# @package task
+defaults:
+- tracking-base
+- override robot: a3
+- _self_
