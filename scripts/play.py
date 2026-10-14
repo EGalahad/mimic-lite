@@ -116,6 +116,9 @@ def export_policy(cfg: DictConfig, env: "_EnvBase", policy) -> None:
     wandb_run_id, checkpoint_num = _checkpoint_tags(checkpoint_path)
 
     deploy_policy = copy.deepcopy(policy.get_rollout_policy("deploy")).eval()
+    # Drop the copied instance wrapper, which still closes over the GPU module.
+    # Export uses the copied module under its own VecNorm.freeze context.
+    deploy_policy.__dict__.pop("forward", None)
     fake_input = env.observation_spec[0].rand().to(env.device)
 
     export_dir = FILE_PATH / "exports" / str(cfg.task.name)

@@ -5,10 +5,7 @@ from typing import Mapping, Sequence
 
 import torch
 
-try:
-    import isaaclab.utils.string as string_utils
-except ModuleNotFoundError:
-    from mjlab.utils.lab_api import string as string_utils
+from active_adaptation.utils import string as string_utils
 
 
 ActionBoundsConfig = Mapping[str, Sequence[float]]

@@ -1,0 +1,6 @@
+# @package task.command
+motion_cfgs:
+  rp1_motions:
+    path: ${oc.env:RP1_MOTION_DATASET,hf://elijahgalahad/any4hdmi-rp1-lafan@23ebcd85ddb5b7b353b7c9fefbbf98f1be7a0f43}
+    weight: 1.0
+    full_motion: true

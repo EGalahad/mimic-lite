@@ -1,7 +1,5 @@
 # @package task
 # Adapt/Finetune: four-second torso XY displacement plus absolute torso Z.
-shared:
-  reward_root_body_name: torso_link
 reward:
   tracking:
     root_pos:

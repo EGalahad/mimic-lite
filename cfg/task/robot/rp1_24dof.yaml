@@ -1,0 +1,9 @@
+# @package task
+# Shared RP1 dynamics, contacts and scaling; optional wrist patterns cover both models.
+defaults:
+  - rp1
+  - _self_
+
+name: RP1TrackBase24Dof
+robot:
+  name: mlite-rp1-24dof

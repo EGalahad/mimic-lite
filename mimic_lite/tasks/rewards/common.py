@@ -78,8 +78,12 @@ class self_collisions(BaseReward, namespace="mimic_lite"):
         self.force_threshold = force_threshold
         self.contact_sensor: "MJLabContactSensor" | "IsaacContactSensor" = self.env.scene.sensors[sensor_name]
 
+    def update(self):
+        # Lazy sensor updates use dynamic indices outside fullgraph compilation.
+        self._contact_data = self.contact_sensor.data
+
     def _compute(self):
-        data = self.contact_sensor.data
+        data = self._contact_data
         if hasattr(data, "force_history") and data.force_history is not None:
             # force_history: [B, N, H, 3]
             force_mag = torch.norm(data.force_history, dim=-1)  # [B, N, H]

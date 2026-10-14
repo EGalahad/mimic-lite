@@ -1,0 +1,3 @@
+# @package task.command
+defaults:
+- /task/motion/rp1_24dof/lafan

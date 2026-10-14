@@ -80,8 +80,11 @@ class feet_slip(TrackReward, namespace="mimic_lite"):
         self.sensor_body_ids = torch.as_tensor(sensor_ids, device=self.device)
         self.tolerance = tolerance
 
+    def update(self):
+        self.in_contact_step = _current_in_contact(self.contact_sensor, self.sensor_body_ids)
+
     def _compute(self):
-        in_contact_step = _current_in_contact(self.contact_sensor, self.sensor_body_ids)
+        in_contact_step = self.in_contact_step
         feet_vel = self.asset.data.body_com_lin_vel_w[:, self.articulation_body_ids, :2]
         feet_vel = (feet_vel.norm(dim=-1) - self.tolerance).clamp(min=0.0, max=1.0)
         slip = (in_contact_step * feet_vel).sum(dim=1, keepdim=True)
