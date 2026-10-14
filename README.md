@@ -2,8 +2,6 @@
 
 <video src="https://github.com/user-attachments/assets/24d16b09-0c8f-4371-9c0d-c07112a6ee0a" controls muted playsinline preload="metadata"></video>
 
-Play the demo and click the speaker icon to enable sound.
-
 ## Setup
 
 Clone the current main branches. Active Adaptation no longer embeds MimicLite
