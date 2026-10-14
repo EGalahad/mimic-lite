@@ -61,10 +61,8 @@ Training motion datasets are available in the [any4hdmi Hugging Face collection]
 
 ## Released Checkpoints
 
-The public releases include the 16x16384 G1 mixture Huge policies and the
-8x8192 MimicLite v1.1 ROA student. GPU hours are measured training compute;
-the PPO/ROA Huge runs used RTX 4090 GPUs, while v1.1 used RTX 4090 for Train
-and Adapt and RTX PRO 6000 for Finetune.
+Public releases include G1 PPO, ROA, and the MimicLite v1.1 ROA student.
+The table lists their model sizes, training environments, checkpoints, and GPU hours.
 
 | Policy | Actor hidden dimensions | Parallel environments | Checkpoint | GPU hours |
 | --- | --- | ---: | --- | ---: |
@@ -72,19 +70,8 @@ and Adapt and RTX PRO 6000 for Finetune.
 | MimicLite-ROA | `[1024, 1024, 1024]` | `16 × 16384` (`train -> adapt -> finetune`) | [`9287d8e0`](https://wandb.ai/elijahgalahad/mimic_lite/runs/9287d8e0) | 173.2 |
 | MimicLite-v1.1 (ROA student) | `[512, 512, 512]` | `8 × 8192` (`train -> adapt -> finetune`) | [Deploy ONNX + YAML](https://drive.google.com/drive/folders/1lrPyiiy7anyG3P4wHNIQQQlydboLPd9e) (`checkpoints/mimic-lite/v1_1`) | 50.106 |
 
-MimicLite also supports **H2, AgiBot A3, and RoboParty RP1 (28 or 24 DoF)** on mjlab and IsaacLab. See [supported robots and released checkpoints](docs/checkpoints.md) for model-matched downloads and motion profiles.
-
-Download the deploy ONNX and YAML from the shared sim2real artifacts:
-[MimicLite-PPO](https://drive.google.com/drive/folders/1xRmcOX0l-YIpqxUuCmW4s6Dl0HStbJSL)
-and
-[MimicLite-ROA](https://drive.google.com/drive/folders/1AFcvP4oDbEskx-wip5bJN-JBaUvwp8MH).
-MimicLite v1.1 is a supported release, trained for 4,000 / 1,000 / 2,000
-Train / Adapt / Finetune updates. Its original training used
-`wandb.mode=disabled`, so it has no online W&B run; the table links to its
-released deploy files instead. Teacher observations and reward targets are
-clean, with reference-motion observation noise only on the student command.
-See the [MotionDecode leaderboard](https://egalahad.github.io/sim2real/leaderboard/)
-for its evaluation. Older Huge/Base releases remain in the Drive archive.
+MimicLite also supports H2, A3, and RP1 (28 or 24 DoF) on mjlab and IsaacLab; see [supported robots and released checkpoints](docs/checkpoints.md).
+Download G1 deploy artifacts from [PPO](https://drive.google.com/drive/folders/1xRmcOX0l-YIpqxUuCmW4s6Dl0HStbJSL), [ROA](https://drive.google.com/drive/folders/1AFcvP4oDbEskx-wip5bJN-JBaUvwp8MH), or the v1.1 link in the table, and see the [MotionDecode leaderboard](https://egalahad.github.io/sim2real/leaderboard/) for evaluation results.
 
 ![Canonical cross-codebase tracking evaluation](assets/mimic_lite_cross_codebase_tracking_eval.png)
 
@@ -95,12 +82,6 @@ Run commands from the Active Adaptation repository. Select a robot with
 Each profile selects matching assets, joints, rewards and default motion data.
 An explicit `task/motion=...` overrides that default. Use
 `task=tracking-base task/robot=<robot>` for training, playback, and export.
-For Atom, use `task/robot=atom`; its default motion profile is `atom/sonic`.
-
-The base task includes command-reference noise and arm-keypoint rewards for
-all robots. PPO training uses the four-second root XYZ window reward. ROA
-stages add teacher references through frame 16, with absolute root XYZ in
-Train and the window reward in Adapt/Finetune.
 
 Run single-stage G1 PPO:
 
@@ -110,28 +91,18 @@ bash scripts/launch_ddp.sh 0,1,2,3,4,5,6,7 projects/mimic-lite/scripts/train.py 
   algo/ppo/module=huge backend=mjlab wandb.mode=online
 ```
 
-Run A3 through the three ROA stages (4,000 Train, 1,000 Adapt,
+Run RP1 through the three ROA stages (4,000 Train, 1,000 Adapt,
 2,000 Finetune updates), with 8 GPUs and 8,192 environments per GPU:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 \
 uv run --project venv/mjlab projects/mimic-lite/scripts/train_sequential.py \
-  task=tracking-base task/robot=a3 backend=mjlab \
-  stages=v1_1 algo/ppo_roa/module=large task.num_envs=8192 wandb.mode=online
+  task=tracking-base task/robot=rp1 backend=mjlab \
+  algo/ppo_roa/module=large task.num_envs=8192 wandb.mode=online
 ```
 
-Replace `a3` with another robot selector to use its default motions.
+Replace `rp1` with another robot selector to use its default motions.
 For IsaacLab, use `--project venv/isaaclab` and `backend=isaaclab`.
-Cache the referenced HF assets and datasets once before a distributed offline
-launch, then set `HF_HUB_OFFLINE=1` and `HF_HUB_DISABLE_TELEMETRY=1`.
-Authenticate W&B before starting formal training.
-
-The optional `task/motion=a3/soma` profile accepts a robot-matched,
-filtered any4hdmi dataset through `A3_SOMA_MOTION_DATASET`. It uses the existing
-512-frame windowed loader (`full_motion: false`); it does not download, retarget
-or filter source data. Download the SOMA source yourself, convert it to the robot-matched any4hdmi
-format, and filter it locally. Set `A3_SOMA_MOTION_DATASET` to the resulting
-local dataset directory. SOMA motion data is not hosted on Hugging Face.
 
 ## Play and export
 

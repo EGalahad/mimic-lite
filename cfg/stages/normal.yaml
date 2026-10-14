@@ -5,14 +5,20 @@ stages:
     overrides:
       - +exp=ppo_roa/train
       - +task/patches=[teacher_future_t16,root_global_xyz]
+      - total_iters=4000
+      - algo.train_every=32
     load_checkpoint_from_previous: false
   - name: adapt
     overrides:
       - +exp=ppo_roa/adapt
       - +task/patches=[teacher_future_t16,root_window_xyz]
+      - total_iters=1000
+      - algo.train_every=16
     load_checkpoint_from_previous: true
   - name: finetune
     overrides:
       - +exp=ppo_roa/finetune
       - +task/patches=[teacher_future_t16,root_window_xyz]
+      - total_iters=2000
+      - algo.train_every=32
     load_checkpoint_from_previous: true
