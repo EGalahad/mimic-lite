@@ -1,8 +1,7 @@
 # @package task.command
-
 motion_cfgs:
   h2_retargeted:
-    path: ${oc.env:H2_MOTION_DATASET,../any4hdmi/output/h2/retargeted}
+    path: ${oc.env:H2_MOTION_DATASET,hf://elijahgalahad/any4hdmi-h2-seed-100@9f553155fb8b7800faa625d72f774232a54f809e}
     weight: 1.0
     full_motion: true
     shard: true

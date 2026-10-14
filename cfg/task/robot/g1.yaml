@@ -1,0 +1,147 @@
+# @package task
+name: G1TrackBase
+shared:
+  root_body_name: pelvis
+  anchor_body_name: pelvis
+  reward_root_body_name: torso_link
+  termination_root_body_name: torso_link
+  obs_body_names:
+  - pelvis
+  - .*_knee_link
+  - .*_toe_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist_yaw_link
+  tracking_body_names:
+  - pelvis
+  - torso_link
+  - .*_hip_yaw_link
+  - .*_knee_link
+  - .*_toe_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist_yaw_link
+  reward_body_names:
+  - pelvis
+  - torso_link
+  - .*_hip_yaw_link
+  - .*_knee_link
+  - .*_toe_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_palm_link
+  tracking_joint_names:
+  - waist_.*_joint
+  - .*_hip_.*_joint
+  - .*_knee_joint
+  - .*_ankle_.*_joint
+  - .*_shoulder_.*_joint
+  - .*_elbow_joint
+  - .*_wrist_.*_joint
+  reward_joint_names:
+  - waist_.*_joint
+  - .*_hip_.*_joint
+  - .*_knee_joint
+  - .*_shoulder_.*_joint
+  - .*_elbow_joint
+  - .*_wrist_.*_joint
+  motion_body_names:
+  - pelvis
+  - torso_link
+  - .*_hip_yaw_link
+  - .*_knee_link
+  - .*_toe_link
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_wrist_yaw_link
+  - .*_palm_link
+  arm_keypoint_body_names:
+  - .*_shoulder_yaw_link
+  - .*_elbow_link
+  - .*_palm_link
+  feet_body_names:
+  - left_ankle_roll_link
+  - right_ankle_roll_link
+  toe_body_names:
+  - left_toe_link
+  - right_toe_link
+  feet_metric_body_names: .*ankle_roll_link
+robot:
+  name: g1-mode_15
+input:
+  action:
+    action_scaling:
+      .*_hip_yaw_joint: 0.55
+      .*_hip_roll_joint: 0.35
+      .*_hip_pitch_joint: 0.55
+      .*_knee_joint: 0.35
+      .*_ankle_pitch_joint: 0.44
+      .*_ankle_roll_joint: 0.44
+      waist_roll_joint: 0.44
+      waist_pitch_joint: 0.44
+      waist_yaw_joint: 0.55
+      .*_shoulder_pitch_joint: 0.44
+      .*_shoulder_roll_joint: 0.44
+      .*_shoulder_yaw_joint: 0.44
+      .*_elbow_joint: 0.44
+      .*_wrist_roll_joint: 0.44
+      .*_wrist_pitch_joint: 0.44
+      .*_wrist_yaw_joint: 0.44
+reward:
+  loco:
+    feet_air_time: {}
+randomization:
+  perturb_body_materials:
+    body_names:
+    - .*ankle_roll_link
+    - .*_wrist_yaw_link
+    static_friction_range:
+    - 0.3
+    - 1.6
+    dynamic_friction_range:
+    - 0.3
+    - 1.2
+    restitution_range:
+    - 0.0
+    - 0.5
+    solref_time_constant_range:
+    - 0.015
+    - 0.03
+    solref_dampratio_range:
+    - 0.5
+    - 2.0
+    homogeneous: true
+  perturb_body_mass:
+    pelvis:
+    - 0.9
+    - 1.1
+    torso_link:
+    - 0.9
+    - 1.1
+  perturb_body_com:
+    pelvis|torso_link:
+    - -0.03
+    - 0.03
+  actuator_params:
+    stiffness_range:
+      .*(shoulder|elbow|wrist).*:
+      - 0.9
+      - 1.1
+      .*(waist|hip|knee|ankle).*:
+      - 0.8
+      - 1.2
+    damping_range:
+      .*(shoulder|elbow|wrist).*:
+      - 0.9
+      - 1.1
+      .*(waist|hip|knee|ankle).*:
+      - 0.8
+      - 1.2
+    armature_range:
+      .*:
+      - 0.75
+      - 1.25
+    friction_range:
+      .*:
+      - 0.05
+      - 0.25

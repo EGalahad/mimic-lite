@@ -1,0 +1,3 @@
+# @package task.command
+defaults:
+- /task/motion/atom/sonic

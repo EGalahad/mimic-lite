@@ -4,12 +4,15 @@ stages:
   - name: train
     overrides:
       - +exp=ppo_roa/train
+      - +task/patches=[teacher_future_t16,root_global_xyz]
     load_checkpoint_from_previous: false
   - name: adapt
     overrides:
       - +exp=ppo_roa/adapt
+      - +task/patches=[teacher_future_t16,root_window_xyz]
     load_checkpoint_from_previous: true
   - name: finetune
     overrides:
       - +exp=ppo_roa/finetune
+      - +task/patches=[teacher_future_t16,root_window_xyz]
     load_checkpoint_from_previous: true

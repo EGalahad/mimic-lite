@@ -14,7 +14,7 @@ registry = Registry.instance()
 
 
 G1_XMLS_REPO_ID = "elijahgalahad/g1_xmls"
-G1_XMLS_REVISION = "main"
+G1_XMLS_REVISION = "1c1d082f299126b9272e81c04121ff347c97fa8f"
 
 G1_MJCF_REF_BY_MODE = {
     5: f"hf://{G1_XMLS_REPO_ID}@{G1_XMLS_REVISION}/g1-mode_5_11.xml",
@@ -23,11 +23,13 @@ G1_MJCF_REF_BY_MODE = {
     15: f"hf://{G1_XMLS_REPO_ID}@{G1_XMLS_REVISION}/g1-mode_13_15.xml",
 }
 
+G1_URDF_REVISION = "98d9d702424b2531538242256175f649cf053b42"
+
 G1_URDF_REF_BY_MODE = {
-    5: f"hf://{G1_XMLS_REPO_ID}@{G1_XMLS_REVISION}/g1-mode_5_11.urdf",
-    11: f"hf://{G1_XMLS_REPO_ID}@{G1_XMLS_REVISION}/g1-mode_5_11.urdf",
-    13: f"hf://{G1_XMLS_REPO_ID}@{G1_XMLS_REVISION}/g1-mode_13_15.urdf",
-    15: f"hf://{G1_XMLS_REPO_ID}@{G1_XMLS_REVISION}/g1-mode_13_15.urdf",
+    5: f"hf://{G1_XMLS_REPO_ID}@{G1_URDF_REVISION}/urdf/g1-mode_5_11.urdf",
+    11: f"hf://{G1_XMLS_REPO_ID}@{G1_URDF_REVISION}/urdf/g1-mode_5_11.urdf",
+    13: f"hf://{G1_XMLS_REPO_ID}@{G1_URDF_REVISION}/urdf/g1-mode_13_15.urdf",
+    15: f"hf://{G1_XMLS_REPO_ID}@{G1_URDF_REVISION}/urdf/g1-mode_13_15.urdf",
 }
 
 TOE_BODY_BY_ANKLE_BODY = {
@@ -217,9 +219,9 @@ def _build_g1_cfg(mode: int, backend: str):
             "g1_ankle": G1_ACTUATOR_ANKLE,
     }
     body_names = _with_toe_body_names(list(BODY_NAMES_SIMULATION))
+    body_names.extend(["left_palm_link", "right_palm_link"])
 
     if backend == "mjlab":
-        body_names.extend(["left_palm_link", "right_palm_link"])
         import mujoco
         from active_adaptation.assets.asset_cfg import AssetSpec, EntityCfg
         from mjlab.actuator import BuiltinPositionActuatorCfg
@@ -313,6 +315,7 @@ def _build_g1_cfg(mode: int, backend: str):
                 replace_cylinders_with_capsules=True,
                 self_collision=True,
                 make_instanceable=False,
+                merge_fixed_joints=False,
                 force_usd_conversion=True,
                 joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
                     gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(

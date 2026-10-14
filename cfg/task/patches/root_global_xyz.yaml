@@ -1,7 +1,5 @@
 # @package task
 # Teacher: absolute torso XYZ; no sliding window.
-shared:
-  reward_root_body_name: torso_link
 reward:
   tracking:
     root_pos:
