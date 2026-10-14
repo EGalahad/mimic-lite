@@ -1,5 +1,0 @@
-# @package task
-defaults:
-- tracking-base
-- override robot: rp1
-- _self_

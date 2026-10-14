@@ -1,0 +1,147 @@
+# @package task
+name: Atom01TrackBase
+shared:
+  root_body_name: base_link
+  anchor_body_name: base_link
+  reward_root_body_name: torso_link
+  termination_root_body_name: base_link
+  obs_body_names:
+  - base_link
+  - torso_link
+  - .*_knee_link
+  - .*_ankle_roll_link
+  - .*_toe_link
+  - .*_arm_yaw_link
+  - .*_elbow_yaw_link
+  tracking_body_names:
+  - base_link
+  - torso_link
+  - .*_thigh_yaw_link
+  - .*_thigh_pitch_link
+  - .*_knee_link
+  - .*_ankle_roll_link
+  - .*_toe_link
+  - .*_arm_yaw_link
+  - .*_elbow_yaw_link
+  tracking_joint_names:
+  - torso_joint
+  - .*_thigh_.*_joint
+  - .*_knee_joint
+  - .*_ankle_.*_joint
+  - .*_arm_.*_joint
+  - .*_elbow_.*_joint
+  reward_joint_names:
+  - torso_joint
+  - .*_thigh_.*_joint
+  - .*_knee_joint
+  - .*_ankle_.*_joint
+  - .*_arm_.*_joint
+  - .*_elbow_.*_joint
+sim:
+  mjlab_nconmax: 200
+  mjlab_njmax: 1000
+robot:
+  name: atom01-capsule
+input:
+  action:
+    action_scaling:
+      .*_elbow_.*: 1.0
+      .*_arm_.*: 1.0
+      .*_thigh_.*: 0.5
+      .*_knee.*: 0.5
+      .*torso.*: 0.5
+      .*_ankle_.*: 0.5
+command:
+  tracking_body_names: ${task.shared.tracking_body_names}
+reward:
+  tracking:
+    root_pos:
+      _target_: mimic_lite.body_pos_exp
+    body_pos:
+      body_names: ${task.shared.tracking_body_names}
+    body_ori:
+      body_names: ${task.shared.tracking_body_names}
+    body_linvel:
+      body_names: ${task.shared.tracking_body_names}
+    body_angvel:
+      body_names: ${task.shared.tracking_body_names}
+  loco:
+    power_safety_regularization:
+      _target_: mimic_lite.power_safety_regularization
+      weight: -10.0
+      joint_names: .*_knee_joint
+      deadband: 150.0
+      power_norm: 500.0
+      enabled: false
+    feet_air_time:
+      body_names:
+      - left_ankle_roll_link
+      - right_ankle_roll_link
+      body2_names:
+      - left_toe_link
+      - right_toe_link
+  tracking_metrics:
+    body_pos:
+      body_names: ${task.shared.tracking_body_names}
+    body_ori:
+      body_names: ${task.shared.tracking_body_names}
+  loco_metrics:
+    feet_contact_count:
+      body_names: .*ankle_roll_link
+    feet_contact_duration:
+      body_names: .*ankle_roll_link
+randomization:
+  perturb_body_materials:
+    body_names:
+    - .*ankle_roll_link
+    - .*_elbow_yaw_link
+    static_friction_range:
+    - 0.3
+    - 1.6
+    dynamic_friction_range:
+    - 0.3
+    - 1.2
+    restitution_range:
+    - 0.0
+    - 0.5
+    solref_time_constant_range:
+    - 0.015
+    - 0.03
+    solref_dampratio_range:
+    - 0.5
+    - 2.0
+    homogeneous: true
+  perturb_body_mass:
+    base_link:
+    - 0.9
+    - 1.1
+    torso_link:
+    - 0.9
+    - 1.1
+  perturb_body_com:
+    base_link|torso_link:
+    - -0.03
+    - 0.03
+  actuator_params:
+    stiffness_range:
+      .*(arm|elbow).*:
+      - 0.9
+      - 1.1
+      .*(torso|thigh|knee|ankle).*:
+      - 0.8
+      - 1.2
+    damping_range:
+      .*(arm|elbow).*:
+      - 0.9
+      - 1.1
+      .*(torso|thigh|knee|ankle).*:
+      - 0.8
+      - 1.2
+    armature_range:
+      .*:
+      - 0.75
+      - 1.25
+    friction_range:
+      .*:
+      - 0.05
+      - 0.25

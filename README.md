@@ -89,10 +89,11 @@ for its evaluation. Older Huge/Base releases remain in the Drive archive.
 ## Train
 
 Run commands from the Active Adaptation repository. Select a robot with
-`task/robot=g1|h2|a3|rp1|rp1_24dof`; G1 is the default.
+`task/robot=g1|h2|a3|rp1|rp1_24dof|atom`; G1 is the default.
 Each profile selects matching assets, joints, rewards and default motion data.
-An explicit `task/motion=...` overrides that default. Existing `tracking-base-*`
-task aliases remain available.
+An explicit `task/motion=...` overrides that default. Use
+`task=tracking-base task/robot=<robot>` for training, playback, and export.
+For Atom, use `task/robot=atom`; its default motion profile is `atom/sonic`.
 
 Run single-stage G1 PPO:
 

@@ -1,5 +1,0 @@
-# @package task
-defaults:
-- tracking-base
-- override robot: h2
-- _self_
