@@ -95,6 +95,11 @@ An explicit `task/motion=...` overrides that default. Use
 `task=tracking-base task/robot=<robot>` for training, playback, and export.
 For Atom, use `task/robot=atom`; its default motion profile is `atom/sonic`.
 
+The base task includes command-reference noise and arm-keypoint rewards for
+all robots. PPO training uses the four-second root XYZ window reward. ROA
+stages add teacher references through frame 16, with absolute root XYZ in
+Train and the window reward in Adapt/Finetune.
+
 Run single-stage G1 PPO:
 
 ```bash

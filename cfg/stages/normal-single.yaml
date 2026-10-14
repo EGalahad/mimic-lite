@@ -3,15 +3,17 @@
 stages:
   - name: train-single
     overrides:
-      - +exp=ppo_roa/train-single
+      - +exp=ppo_roa/train
+      - +task/patches=[teacher_future_t16,root_global_xyz]
       - total_iters=2000
     load_checkpoint_from_previous: false
   - name: adapt-single
     overrides:
       - +exp=ppo_roa/adapt
+      - +task/patches=[teacher_future_t16,root_window_xyz]
     load_checkpoint_from_previous: true
   - name: finetune-single
     overrides:
       - +exp=ppo_roa/finetune
-      - +task/patches=temporal_align
+      - +task/patches=[teacher_future_t16,root_window_xyz]
     load_checkpoint_from_previous: true

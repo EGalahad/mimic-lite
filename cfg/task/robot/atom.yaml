@@ -4,6 +4,9 @@ shared:
   root_body_name: base_link
   anchor_body_name: base_link
   reward_root_body_name: torso_link
+  arm_keypoint_body_names:
+  - .*_arm_yaw_link
+  - .*_elbow_yaw_link
   termination_root_body_name: base_link
   obs_body_names:
   - base_link

@@ -78,6 +78,13 @@ command:
   rewind_steps_range: [25, 125]
 
 observation:
+  command:
+    ref_root_pos_future_local:
+      noise_std: 0.002
+    ref_root_ori_future_b:
+      noise_std: 0.02
+    ref_joint_pos_future:
+      noise_std: 0.01
   policy:
     root_ang_vel_history:
       _target_: mimic_lite.root_ang_vel_history
@@ -108,6 +115,16 @@ observation:
 
 reward:
   tracking:
+    arm_keypoint_pos:
+      _target_: mimic_lite.body_pos_local_exp
+      body_names: ${task.shared.arm_keypoint_body_names}
+      weight: 0.5
+      sigma: 0.05
+    arm_keypoint_ori:
+      _target_: mimic_lite.body_ori_local_exp
+      body_names: ${task.shared.arm_keypoint_body_names}
+      weight: 0.5
+      sigma: 0.1
     root_pos:
       _target_: mimic_lite.windowed_root_displacement_exp
       body_names: ["${task.shared.reward_root_body_name}"]
