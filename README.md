@@ -1,6 +1,6 @@
 # MimicLite
 
-<video src="https://github.com/user-attachments/assets/24d16b09-0c8f-4371-9c0d-c07112a6ee0a" controls muted playsinline preload="metadata"></video>
+<video src="https://github.com/user-attachments/assets/d3398ade-774e-4714-b50e-299a0048b0c0" controls muted playsinline preload="metadata"></video>
 
 ## Setup
 
