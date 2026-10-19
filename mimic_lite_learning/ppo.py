@@ -1000,7 +1000,7 @@ class PPOPolicy(PPOBase):
                 local_count = mask.sum()
                 local_sum = (x * mask.unsqueeze(-1)).sum(dim=(0, 1))
                 local_sum_sq = (x * x * mask.unsqueeze(-1)).sum(dim=(0, 1))
-                count = local_count.float().expand_as(local_sum).clamp_min_(1)
+                count = local_count.float().expand_as(local_sum).clamp_min(1)
 
                 mean = local_sum / count
                 var = (local_sum_sq / count) - (mean * mean)
